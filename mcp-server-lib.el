@@ -569,6 +569,8 @@ Returns a JSON-RPC response string for the request."
       (mcp-server-lib--handle-tools-list id))
      ((equal method "resources/list")
       (mcp-server-lib--handle-resources-list id))
+     ((equal method "resources/templates/list")
+      (mcp-server-lib--handle-resources-templates-list id))
      ((equal method "resources/read")
       (mcp-server-lib--handle-resources-read
        id params method-metrics))
@@ -690,7 +692,7 @@ Returns a vector of resource entries."
      hash-table)
     entries))
 
-(defun mcp-server-lib--handle-resources-list (id)
+(defun mcp-server-lib--handle-resources-list--COMBINED (id)
   "Handle resources/list request with ID.
 
 Returns a list of all registered resources with their metadata."
@@ -704,6 +706,23 @@ Returns a list of all registered resources with their metadata."
            mcp-server-lib--resource-templates t))))
     (mcp-server-lib--jsonrpc-response
      id `((resources . ,resource-list)))))
+
+;; We need to handle the resources and resource templates separately:
+(defun mcp-server-lib--handle-resources-list (id)
+  "Handle resources/list request with ID - concrete resources only."
+  (let ((resource-list
+         (mcp-server-lib--collect-resources-from-hash
+          mcp-server-lib--resources nil)))  ; Only concrete resources
+    (mcp-server-lib--jsonrpc-response
+     id `((resources . ,resource-list)))))
+
+(defun mcp-server-lib--handle-resources-templates-list (id)
+  "Handle resources/templates/list request with ID."
+  (let ((templates
+         (mcp-server-lib--collect-resources-from-hash
+          mcp-server-lib--resource-templates t)))
+    (mcp-server-lib--jsonrpc-response
+     id `((resourceTemplates . ,templates)))))
 
 (defun mcp-server-lib--handle-tools-call (id params method-metrics)
   "Handle tools/call request with ID and PARAMS.
