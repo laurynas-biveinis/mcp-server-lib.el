@@ -265,22 +265,24 @@ The URI-TEMPLATE is searched as uriTemplate in JSON."
   (seq-find (lambda (r) (equal (alist-get 'uriTemplate r) uri-template))
   resources))
 
-(defun mcp-server-lib-test--build-resource-verification (resource-spec)
+(defun mcp-server-lib-test--build-resource-verification (resource-spec &optional list-var)
   "Build verification code for a single RESOURCE-SPEC.
 RESOURCE-SPEC is a list of (URI HANDLER &rest PROPERTIES).
-Returns a form that verifies the resource appears in resource-list with
+LIST-VAR is the variable name to use for the resource list (defaults to 'resource-list).
+Returns a form that verifies the resource appears in the resource list with
 expected properties."
   (let* ((uri (car resource-spec))
          (props (cddr resource-spec))
          (name (plist-get props :name))
          (description (plist-get props :description))
          (mime-type (plist-get props :mime-type))
-         (is-template (string-match-p "{" uri)))
+         (is-template (string-match-p "{" uri))
+         (list-variable (or list-var 'resource-list)))
     `(let ((resource ,(if is-template
                           `(mcp-server-lib-test--find-resource-by-uri-template
-                            ,uri resource-list)
+                            ,uri ,list-variable)
                         `(mcp-server-lib-test--find-resource-by-uri
-                          ,uri resource-list))))
+                          ,uri ,list-variable))))
        (should resource)
        (should (equal (alist-get ',(if is-template 'uriTemplate 'uri) resource)
                       ,uri))
@@ -307,13 +309,26 @@ Arguments:
   BODY       Forms to execute with server running and resources registered"
   (declare (indent 1) (debug t))
   ;; Build the verification code
-  (let ((verification-code
-         `(let ((resource-list (mcp-server-lib-ert-get-resource-list)))
-            ;; Check we have the expected number of resources
-            (should (= ,(length resources) (length resource-list)))
-            ;; Verify each registered resource appears in the list
-            ,@(mapcar #'mcp-server-lib-test--build-resource-verification
-                      resources))))
+  (let* ((concrete-resources (seq-remove (lambda (r) (string-match-p "{" (car r))) resources))
+         (template-resources (seq-filter (lambda (r) (string-match-p "{" (car r))) resources))
+         (verification-code
+          `(progn
+             ;; Check concrete resources
+             ,(when concrete-resources
+                `(let ((resource-list (mcp-server-lib-ert-get-resource-list)))
+                   ;; Check we have the expected number of concrete resources
+                   (should (= ,(length concrete-resources) (length resource-list)))
+                   ;; Verify each registered concrete resource appears in the list
+                   ,@(mapcar (lambda (r) (mcp-server-lib-test--build-resource-verification r 'resource-list))
+                             concrete-resources)))
+             ;; Check template resources
+             ,(when template-resources
+                `(let ((template-list (mcp-server-lib-ert-get-resource-templates-list)))
+                   ;; Check we have the expected number of template resources
+                   (should (= ,(length template-resources) (length template-list)))
+                   ;; Verify each registered template resource appears in the list
+                   ,@(mapcar (lambda (r) (mcp-server-lib-test--build-resource-verification r 'template-list))
+                             template-resources))))))
     ;; Build nested mcp-server-lib-test--register-resource calls
     ;; wrapping server start, verification, and body execution
     (let ((server-and-body
@@ -871,6 +886,25 @@ from a function loaded from bytecode rather than interpreted elisp."
          (parsed (json-read-from-string request)))
     (should (equal "2.0" (alist-get 'jsonrpc parsed)))
     (should (equal "resources/list" (alist-get 'method parsed)))
+    (should (equal 1 (alist-get 'id parsed)))))
+
+;;; `mcp-server-lib-create-resources-templates-list-request' tests
+(ert-deftest mcp-server-lib-test-create-resources-templates-list-request-with-id ()
+  "Test `mcp-server-lib-create-resources-templates-list-request' with a specified ID."
+  (let* ((id 42)
+         (request (mcp-server-lib-create-resources-templates-list-request id))
+         (parsed (json-read-from-string request)))
+    ;; Verify basic JSON-RPC structure
+    (should (equal "2.0" (alist-get 'jsonrpc parsed)))
+    (should (equal "resources/templates/list" (alist-get 'method parsed)))
+    (should (equal id (alist-get 'id parsed)))))
+
+(ert-deftest mcp-server-lib-test-create-resources-templates-list-request-default-id ()
+  "Test `mcp-server-lib-create-resources-templates-list-request' with default ID."
+  (let* ((request (mcp-server-lib-create-resources-templates-list-request))
+         (parsed (json-read-from-string request)))
+    (should (equal "2.0" (alist-get 'jsonrpc parsed)))
+    (should (equal "resources/templates/list" (alist-get 'method parsed)))
     (should (equal 1 (alist-get 'id parsed)))))
 
 ;;; `mcp-server-lib-create-resources-read-request' tests
@@ -1514,6 +1548,35 @@ from a function loaded from bytecode rather than interpreted elisp."
 
 ;;; Resource tests
 
+;;; Resource endpoint separation tests
+(ert-deftest test-mcp-server-lib-resources-endpoints-separation ()
+  "Test that resources/list and resources/templates/list return different content."
+  (mcp-server-lib-ert-with-server :tools nil :resources nil
+    ;; Register a concrete resource
+    (mcp-server-lib-register-resource
+     "test://concrete"
+     #'mcp-server-lib-test--return-string
+     :name "Concrete Resource")
+    ;; Register a resource template
+    (mcp-server-lib-register-resource
+     "test://{id}"
+     #'mcp-server-lib-test--resource-template-handler-dump-params
+     :name "Template Resource")
+    ;; Verify resources/list returns only concrete resources
+    (let ((resources (mcp-server-lib-ert-get-resource-list)))
+      (should (= 1 (length resources)))
+      (should (string= "test://concrete" (alist-get 'uri (aref resources 0)))))
+    ;; Verify resources/templates/list returns only templates
+    (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+      (should (= 1 (length templates)))
+      (should (string= "test://{id}" (alist-get 'uriTemplate (aref templates 0)))))))
+
+(ert-deftest test-mcp-server-lib-resources-templates-list-empty ()
+  "Test resources/templates/list with no registered templates."
+  (mcp-server-lib-ert-with-server :tools nil :resources nil
+    (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+      (should (= 0 (length templates))))))
+
 (ert-deftest test-mcp-server-lib-resources-list-empty ()
   "Test resources/list with no registered resources."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
@@ -1960,22 +2023,22 @@ from a function loaded from bytecode rather than interpreted elisp."
     ("test://{id}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Test Files"))
-   ;; Verify all three are listed
-   (let ((resources (mcp-server-lib-ert-get-resource-list)))
-     (should (= 3 (length resources))))
+   ;; Verify all three are listed (these are templates, so use templates endpoint)
+   (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+     (should (= 3 (length templates))))
    ;; Unregister the middle one
    (mcp-server-lib-unregister-resource "doc://{docname}")
    ;; Verify only two remain
-   (let ((resources (mcp-server-lib-ert-get-resource-list)))
-     (should (= 2 (length resources)))
+   (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+     (should (= 2 (length templates)))
      ;; Check the remaining ones
      (should (mcp-server-lib-test--find-resource-by-uri-template
-              "org://{filename}" resources))
+              "org://{filename}" templates))
      (should (mcp-server-lib-test--find-resource-by-uri-template
-              "test://{id}" resources))
+              "test://{id}" templates))
      ;; Verify the unregistered one is gone
      (should-not (mcp-server-lib-test--find-resource-by-uri-template
-                  "doc://{docname}" resources)))
+                  "doc://{docname}" templates)))
    ;; Verify the remaining templates still work
    (mcp-server-lib-ert-verify-resource-read
     "org://test.org"
@@ -2065,8 +2128,8 @@ from a function loaded from bytecode rather than interpreted elisp."
       #'mcp-server-lib-test--resource-template-handler-dump-params-2
       :name "Uppercase Template"
       ;; Both templates should be registered
-      (let ((resources (mcp-server-lib-ert-get-resource-list)))
-        (should (= 2 (length resources))))
+      (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+        (should (= 2 (length templates))))
       ;; Test that they extract different variables
       (mcp-server-lib-ert-verify-resource-read
        "test://john"
@@ -2089,8 +2152,8 @@ from a function loaded from bytecode rather than interpreted elisp."
         (format "UPPERCASE PATH: %s" (alist-get "id" params nil nil #'string=)))
       :name "Uppercase Path Template"
       ;; Both templates should be registered
-      (let ((resources (mcp-server-lib-ert-get-resource-list)))
-        (should (= 2 (length resources))))
+      (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+        (should (= 2 (length templates))))
       ;; Test lowercase path matches only lowercase template
       (mcp-server-lib-ert-verify-resource-read
        "test://path/123"
@@ -2185,8 +2248,8 @@ from a function loaded from bytecode rather than interpreted elisp."
        '((uri . "test://item/123")
          (text . "params: ((\"id\" . \"item/123\"))")))
       ;; Verify both templates are registered
-      (let ((resources (mcp-server-lib-ert-get-resource-list)))
-        (should (= 2 (length resources))))))))
+      (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+        (should (= 2 (length templates))))))))
 
 (ert-deftest test-mcp-server-lib-resources-read-malformed-params ()
   "Test resources/read with invalid params structure (string instead of object)."

@@ -245,6 +245,28 @@ Example:
     (should (arrayp result))
     result))
 
+(defun mcp-server-lib-ert-get-resource-templates-list ()
+  "Get the successful response to a \\='resources/templates/list request.
+This is a convenience function for tests that need to verify resource template lists.
+It sends a resources/templates/list request, verifies success, and returns the
+resource templates array.
+
+Returns an array of resource template objects.
+
+Example:
+  (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+    (should (= 1 (length templates)))
+    (should (string= \"test://{id}\"
+                     (alist-get \\='uriTemplate (aref templates 0)))))"
+  (let ((result
+         (alist-get
+          'resourceTemplates
+          (mcp-server-lib-ert-get-success-result
+           "resources/templates/list"
+           (mcp-server-lib-create-resources-templates-list-request)))))
+    (should (arrayp result))
+    result))
+
 (cl-defmacro
  mcp-server-lib-ert-with-server
  (&rest body &key tools resources &allow-other-keys)
