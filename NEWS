@@ -3,6 +3,12 @@ mcp-server-lib.el NEWS -- history of user-visible changes
 * Changes in mcp-server-lib 0.2.0 (unreleased)
 
 ** New Features
+*** Multi-parameter tool support
+    Tools can now accept multiple parameters. The library automatically maps
+    JSON object fields to function parameters using camelCase to kebab-case
+    conversion. Parameters are validated - missing required parameters or
+    unexpected parameters will return appropriate JSON-RPC errors.
+
 *** Enhanced testing support for MCP servers
     The library now provides testing utilities through the mcp-server-lib-ert
     module for dependent packages.

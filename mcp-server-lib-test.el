@@ -111,6 +111,25 @@ INPUT-STRING is the string argument.
 MCP Parameters:"
   (concat "Test: " input-string))
 
+(defun mcp-server-lib-test--tool-handler-two-params (first-name last-name)
+  "Test handler with two parameters.
+FIRST-NAME and LAST-NAME are the person's names.
+
+MCP Parameters:
+  first-name - Person's first name
+  last-name - Person's last name"
+  (format "Hello, %s %s!" first-name last-name))
+
+(defun mcp-server-lib-test--tool-handler-three-params (title first-name last-name)
+  "Test handler with three parameters.
+TITLE, FIRST-NAME and LAST-NAME are the person's title and names.
+
+MCP Parameters:
+  title - Person's title (e.g. Mr, Ms, Dr)
+  first-name - Person's first name
+  last-name - Person's last name"
+  (format "Hello, %s %s %s!" title first-name last-name))
+
 ;; Bytecode handler function that will be loaded during tests
 (declare-function mcp-server-lib-test-bytecode-handler--handler
                   "mcp-server-lib-bytecode-handler-test")
@@ -991,6 +1010,98 @@ from a function loaded from bytecode rather than interpreted elisp."
       (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
        "input-string" "string" "test parameter for string input"))))
 
+(ert-deftest mcp-server-lib-test-tools-list-schema-two-param-handler ()
+  "Test that `tools/list` schema includes multiple parameter descriptions."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-two-params
+        :id "two-params"
+        :description "A tool that requires two arguments"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (let* ((result (mcp-server-lib-ert-get-success-result
+                      "tools/list"
+                      (mcp-server-lib-create-tools-list-request)))
+             (tool-list (alist-get 'tools result))
+             (tool (elt tool-list 0))
+             (schema (alist-get 'inputSchema tool))
+             (properties (alist-get 'properties schema))
+             (required (alist-get 'required schema))
+             (first-name-prop (alist-get 'first-name properties))
+             (last-name-prop (alist-get 'last-name properties)))
+        ;; Verify the schema structure
+        (should (equal "object" (alist-get 'type schema)))
+        ;; Check properties exist with original parameter names
+        (should first-name-prop)
+        (should last-name-prop)
+        ;; Check descriptions exist (don't check exact quotes due to text-quoting-style)
+        (should (stringp (alist-get 'description first-name-prop)))
+        (should (stringp (alist-get 'description last-name-prop)))
+        (should (string-match-p "first name" (alist-get 'description first-name-prop)))
+        (should (string-match-p "last name" (alist-get 'description last-name-prop)))
+        ;; Check types
+        (should (equal "string" (alist-get 'type first-name-prop)))
+        (should (equal "string" (alist-get 'type last-name-prop)))
+        ;; Check required fields (required is a vector)
+        (should (seq-contains-p required "first-name"))
+        (should (seq-contains-p required "last-name"))))))
+
+(ert-deftest mcp-server-lib-test-tools-call-two-param-handler ()
+  "Test invoking a tool with two parameters."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-two-params
+        :id "two-params"
+        :description "A tool that requires two arguments"))
+    (let* ((args '((first-name . "John") (last-name . "Doe")))
+           (result (mcp-server-lib-test--call-tool "two-params" 42 args)))
+      (mcp-server-lib-test--check-mcp-server-lib-content-format
+       result "Hello, John Doe!"))))
+
+(ert-deftest mcp-server-lib-test-tools-call-three-param-handler ()
+  "Test invoking a tool with three parameters."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-three-params
+        :id "three-params"
+        :description "A tool that requires three arguments"))
+    (let* ((args '((title . "Dr") (first-name . "Jane") (last-name . "Smith")))
+           (result (mcp-server-lib-test--call-tool "three-params" 99 args)))
+      (mcp-server-lib-test--check-mcp-server-lib-content-format
+       result "Hello, Dr Jane Smith!"))))
+
+(ert-deftest mcp-server-lib-test-tools-call-missing-required-param ()
+  "Test that calling a multi-param tool with missing parameters returns an error."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-two-params
+        :id "two-params"
+        :description "A tool that requires two arguments"))
+    ;; Call with only one parameter when two are required
+    (let* ((args '((first-name . "John")))  ; Missing last-name
+           (request (mcp-server-lib-create-tools-call-request "two-params" 42 args))
+           (response (mcp-server-lib-process-jsonrpc-parsed request))
+           (error-obj (alist-get 'error response)))
+      (should error-obj)
+      (should (equal mcp-server-lib-jsonrpc-error-invalid-params
+                     (alist-get 'code error-obj)))
+      (should (string-match-p "Missing required parameter"
+                               (alist-get 'message error-obj))))))
+
+(ert-deftest mcp-server-lib-test-tools-call-too-many-params ()
+  "Test that calling a tool with extra parameters returns an error."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-two-params
+        :id "two-params"
+        :description "A tool that requires two arguments"))
+    ;; Call with three parameters when only two are expected
+    (let* ((args '((first-name . "John") 
+                   (last-name . "Doe")
+                   (middle-name . "Extra")))  ; Extra parameter
+           (request (mcp-server-lib-create-tools-call-request "two-params" 42 args))
+           (response (mcp-server-lib-process-jsonrpc-parsed request))
+           (error-obj (alist-get 'error response)))
+      (should error-obj)
+      (should (equal mcp-server-lib-jsonrpc-error-invalid-params
+                     (alist-get 'code error-obj)))
+      (should (string-match-p "Unexpected parameter"
+                               (alist-get 'message error-obj))))))
+
 
 (ert-deftest mcp-server-lib-test-tools-list-read-only-hint ()
   "Test that `tools/list` response includes readOnlyHint=true."
@@ -1153,7 +1264,7 @@ from a function loaded from bytecode rather than interpreted elisp."
         :id "string-arg-tool"
         :description "A tool that echoes a string argument"))
     (let* ((test-input "Hello, world!")
-           (args `(("input" . ,test-input))))
+           (args `(("input-string" . ,test-input))))
 
       (let ((result
              (mcp-server-lib-test--call-tool "string-arg-tool"

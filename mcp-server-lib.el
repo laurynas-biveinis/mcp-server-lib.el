@@ -131,6 +131,24 @@ Keys are URI templates, values are plists with template metadata and handlers.")
   "Create a JSON-RPC response with ID and RESULT."
   (json-encode `((jsonrpc . "2.0") (id . ,id) (result . ,result))))
 
+(defun mcp-server-lib--json-to-lisp-name (json-name)
+  "Convert JSON-NAME from camelCase to kebab-case.
+For example, \"firstName\" becomes \"first-name\"."
+  (let ((case-fold-search nil))
+    (downcase
+     (replace-regexp-in-string
+      "\\([a-z]\\)\\([A-Z]\\)" "\\1-\\2" json-name))))
+
+(defun mcp-server-lib--lisp-to-json-name (lisp-name)
+  "Convert LISP-NAME from kebab-case to camelCase.
+For example, \"first-name\" becomes \"firstName\"."
+  (let ((parts (split-string lisp-name "-")))
+    (concat (car parts) (mapconcat #'capitalize (cdr parts) ""))))
+
+(defun mcp-server-lib--param-name-matches-arg-p (param-name arg)
+  "Return t if PARAM-NAME matches ARG symbol name."
+  (string= param-name (symbol-name arg)))
+
 (defun mcp-server-lib--extract-param-descriptions (docstring arglist)
   "Extract parameter descriptions from DOCSTRING based on ARGLIST.
 The docstring should contain an \"MCP Parameters:\" section at the end,
@@ -139,6 +157,11 @@ ARGLIST should be the function's argument list.
 Returns an alist mapping parameter names to their descriptions.
 Signals an error if a parameter is described multiple times,
 doesn't match function arguments, or if any parameter is not documented."
+  ;; Validate that all arglist members are symbols
+  (dolist (arg arglist)
+    (unless (symbolp arg)
+      (error "Non-symbol in function arglist: %S" arg)))
+
   (let ((descriptions nil))
     (when docstring
       (when
@@ -160,10 +183,11 @@ doesn't match function arguments, or if any parameter is not documented."
                    "Duplicate parameter '%s' in MCP Parameters"
                    param-name))
                 ;; Check parameter name matches function arguments
-                (unless (and (= 1 (length arglist))
-                             (symbolp (car arglist))
-                             (string=
-                              param-name (symbol-name (car arglist))))
+                (unless
+                    (cl-member
+                     param-name
+                     arglist
+                     :test #'mcp-server-lib--param-name-matches-arg-p)
                   (error
                    "Parameter '%s' in MCP Parameters not in function args %S"
                    param-name
@@ -172,10 +196,8 @@ doesn't match function arguments, or if any parameter is not documented."
                 (push (cons param-name (string-trim param-desc))
                       descriptions))))))
       ;; Check that all function parameters have descriptions
-      (when (and (= 1 (length arglist))
-                 (symbolp (car arglist))
-                 (not (memq (car arglist) '(&optional &rest))))
-        (let ((arg-name (symbol-name (car arglist))))
+      (dolist (arg arglist)
+        (let ((arg-name (symbol-name arg)))
           (unless (assoc arg-name descriptions)
             (error
              "Function parameter '%s' missing from MCP Parameters section"
@@ -185,39 +207,36 @@ doesn't match function arguments, or if any parameter is not documented."
 (defun mcp-server-lib--generate-schema-from-function (func)
   "Generate JSON schema by analyzing FUNC's signature.
 Returns a schema object suitable for tool registration.
-Supports functions with zero or one argument only.
 Extracts parameter descriptions from the docstring if available."
   (let* ((arglist (help-function-arglist func t))
          (docstring (documentation func))
          (param-descriptions
           (mcp-server-lib--extract-param-descriptions
            docstring arglist)))
-    (cond
-     ;; No arguments case
-     ((null arglist)
-      '((type . "object")))
-
-     ;; One argument case
-     ((and (= 1 (length arglist))
-           (symbolp (car arglist))
-           (not (memq (car arglist) '(&optional &rest))))
-      (let* ((arg-name (symbol-name (car arglist)))
-             (description (cdr (assoc arg-name param-descriptions)))
-             ;; Build property schema with type
-             (property-schema `((type . "string")))
-             ;; Add description if provided
-             (property-schema
-              (if description
-                  (cons `(description . ,description) property-schema)
-                property-schema)))
-        `((type . "object")
-          (properties . ((,arg-name . ,property-schema)))
-          (required . [,arg-name]))))
-
-     ;; Everything else is unsupported
-     (t
-      (error
-       "Only functions with zero or one argument are supported")))))
+    (if arglist
+        ;; One or more arguments case
+        (let ((properties '())
+              (required '()))
+          (dolist (arg arglist)
+            (let* ((param-name (symbol-name arg))
+                   (description
+                    (cdr (assoc param-name param-descriptions)))
+                   (property-schema `((type . "string"))))
+              ;; Add description if provided
+              (when description
+                (setq property-schema
+                      (cons
+                       `(description . ,description)
+                       property-schema)))
+              ;; Add to properties with original parameter name
+              (push (cons param-name property-schema) properties)
+              ;; Add to required list
+              (push param-name required)))
+          `((type . "object")
+            (properties . ,(nreverse properties))
+            (required . ,(vconcat (nreverse required)))))
+      ;; No arguments case  
+      '((type . "object")))))
 
 (defun mcp-server-lib--ref-counted-register (key item table)
   "Register ITEM with KEY in TABLE with reference counting.
@@ -729,13 +748,48 @@ METHOD-METRICS is used to track errors for this method."
               (context (list :id id)))
           (condition-case err
               (let*
-                  ((result
-                    ;; Pass first arg value for single-string-arg tools
-                    ;; when arguments are present
-                    (if (and tool-args (not (equal tool-args '())))
-                        (let ((first-arg-value (cdr (car tool-args))))
-                          (funcall handler first-arg-value))
-                      (funcall handler)))
+                  ;; Check if handler is defined before trying to get arglist
+                  ((arglist
+                    (if (fboundp handler)
+                        (help-function-arglist handler t)
+                      ;; If undefined, signal early with proper error
+                      (signal 'void-function (list handler))))
+                   (expected-params '())
+                   (provided-params '())
+                   (arg-values '())
+                   (result
+                    (progn
+                      ;; Collect expected parameter names
+                      (dolist (param arglist)
+                        (let ((param-name (symbol-name param)))
+                          (push (intern param-name) expected-params)))
+                      ;; Collect provided parameter names
+                      (dolist (arg tool-args)
+                        (push (car arg) provided-params))
+                      ;; Check for missing parameters
+                      (dolist (expected expected-params)
+                        (unless (memq expected provided-params)
+                          (signal
+                           'mcp-server-lib-invalid-params
+                           (list
+                            (format "Missing required parameter: %s"
+                                    expected)))))
+                      ;; Check for unexpected parameters
+                      (dolist (provided provided-params)
+                        (unless (memq provided expected-params)
+                          (signal
+                           'mcp-server-lib-invalid-params
+                           (list
+                            (format "Unexpected parameter: %s"
+                                    provided)))))
+                      ;; All validation passed, collect values and call handler
+                      (dolist (param arglist)
+                        (let* ((param-name (symbol-name param))
+                               (value
+                                (alist-get
+                                 (intern param-name) tool-args)))
+                          (push value arg-values)))
+                      (apply handler (nreverse arg-values))))
                    ;; Ensure result is a string, convert nil to empty string
                    (result-text (or result ""))
                    ;; Wrap the handler result in the MCP format
@@ -748,6 +802,14 @@ METHOD-METRICS is used to track errors for this method."
                 (mcp-server-lib-metrics--track-tool-call tool-name)
                 (mcp-server-lib--respond-with-result
                  context formatted-result))
+            ;; Handle invalid parameter errors
+            (mcp-server-lib-invalid-params
+             (mcp-server-lib-metrics--track-tool-call tool-name t)
+             (cl-incf (mcp-server-lib-metrics-errors method-metrics))
+             (mcp-server-lib--jsonrpc-error
+              id
+              mcp-server-lib-jsonrpc-error-invalid-params
+              (error-message-string err)))
             ;; Handle tool-specific errors thrown with
             ;; mcp-server-lib-tool-throw
             (mcp-server-lib-tool-error
@@ -1041,6 +1103,7 @@ See also: `mcp-server-lib-register-tool'"
 ;; Custom error type for tool errors
 (define-error 'mcp-server-lib-tool-error "MCP tool error" 'user-error)
 (define-error 'mcp-server-lib-resource-error "MCP resource error")
+(define-error 'mcp-server-lib-invalid-params "MCP invalid parameters")
 
 (defun mcp-server-lib-tool-throw (error-message)
   "Signal a tool error with ERROR-MESSAGE.
@@ -1258,8 +1321,8 @@ See also: `mcp-server-lib-register-resource'"
 (defun mcp-server-lib-resource-signal-error (code message)
   "Signal a JSON-RPC error from a resource handler.
 
-CODE is the JSON-RPC error code constant (e.g., 
-`mcp-server-lib-jsonrpc-error-invalid-params' or 
+CODE is the JSON-RPC error code constant (e.g.,
+`mcp-server-lib-jsonrpc-error-invalid-params' or
 `mcp-server-lib-jsonrpc-error-internal').
 MESSAGE is the error message string.
 

@@ -73,7 +73,7 @@ For debugging, set =EMACS_MCP_DEBUG_LOG= to a file path.
   :title "Display Name"        ; optional
   :read-only t)                ; optional
 
-;; Tool handler with parameters
+;; Tool handler with one parameter
 (defun my-handler (location)
   "Get weather for LOCATION.
 
@@ -82,9 +82,28 @@ MCP Parameters:
   (mcp-server-lib-with-error-handling
     ;; Your implementation
     ))
+
+;; Tool handler with multiple parameters
+(defun update-todo-state (resource-uri current-state new-state)
+  "Update TODO state of a task.
+
+MCP Parameters:
+  resource-uri - URI of the task to update
+  current-state - Current TODO state (or empty string)
+  new-state - New TODO state to set"
+  (mcp-server-lib-with-error-handling
+    ;; Direct access to parameters, no alist-get needed
+    (message "Updating %s from %s to %s" 
+             resource-uri current-state new-state)))
+
+(mcp-server-lib-register-tool #'update-todo-state
+  :id "update-todo"
+  :description "Update task TODO state")
 #+end_src
 
 Tool handlers should return strings. Use =mcp-server-lib-tool-throw= for errors or wrap with =mcp-server-lib-with-error-handling=.
+
+Tools can have zero, one, or multiple parameters. When a tool has multiple parameters, the JSON object fields from the client are automatically mapped to the function parameters by name (converting from camelCase to kebab-case as needed).
 
 Optional properties:
 - =:title= - User-friendly display name
