@@ -603,7 +603,7 @@ EXPECTED-TYPE is the expected type name in the error message."
     (mcp-server-lib-test--check-jsonrpc-error
      (mcp-server-lib-create-tools-call-request tool-id request-id)
      mcp-server-lib-jsonrpc-error-invalid-params
-     (format "Tool handler must return string or nil, got: %s" expected-type))))
+     (format "MCP invalid parameters: \"Tool handler must return string or nil, got: %s\"" expected-type))))
 
 ;;; Initialization and server capabilities tests
 
