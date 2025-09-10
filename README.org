@@ -101,9 +101,16 @@ MCP Parameters:
   :description "Update task TODO state")
 #+end_src
 
-Tool handlers should return strings. Use =mcp-server-lib-tool-throw= for errors or wrap with =mcp-server-lib-with-error-handling=.
+Tools can have zero, one, or multiple parameters. When a tool has multiple
+parameters, the JSON object fields from the client are automatically mapped to the
+function parameters by name (converting from camelCase to kebab-case as needed).
 
-Tools can have zero, one, or multiple parameters. When a tool has multiple parameters, the JSON object fields from the client are automatically mapped to the function parameters by name (converting from camelCase to kebab-case as needed).
+Tool handlers must return strings or =nil= (which is converted to an empty string).
+Other return types will cause an "Invalid Params" error.
+
+If a tool cannot complete its operation successfully, it should use
+=mcp-server-lib-tool-throw= for throwing an error or the implementation should be
+wrapped with =mcp-server-lib-with-error-handling=.
 
 Optional properties:
 - =:title= - User-friendly display name

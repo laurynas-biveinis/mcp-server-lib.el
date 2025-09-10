@@ -19,6 +19,12 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     information to MCP clients.
 
 ** Bug Fixes
+*** Enforced tool handler return type validation
+    Tool handlers must now return strings or nil. Previously, handlers could
+    return any Elisp value which would be serialized, violating the MCP protocol.
+    This is a breaking change for tools that returned non-string values.
+    See https://github.com/laurynas-biveinis/mcp-server-lib.el/issues/4
+
 *** Fixed resources/list endpoint to match MCP specification
     resources/list now correctly returns only direct resources,
     while templates are returned via the separate resources/templates/list

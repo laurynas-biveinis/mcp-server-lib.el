@@ -130,6 +130,22 @@ MCP Parameters:
   last-name - Person's last name"
   (format "Hello, %s %s %s!" title first-name last-name))
 
+(defun mcp-server-lib-test--tool-handler-returns-list ()
+  "Test tool handler returning a list."
+  '("item1" "item2" "item3"))
+
+(defun mcp-server-lib-test--tool-handler-returns-vector ()
+  "Test tool handler returning a vector."
+  ["item1" "item2" "item3"])
+
+(defun mcp-server-lib-test--tool-handler-returns-number ()
+  "Test tool handler returning a number."
+  42)
+
+(defun mcp-server-lib-test--tool-handler-returns-symbol ()
+  "Test tool handler that returning."
+  'some-symbol)
+
 ;; Bytecode handler function that will be loaded during tests
 (declare-function mcp-server-lib-test-bytecode-handler--handler
                   "mcp-server-lib-bytecode-handler-test")
@@ -573,6 +589,21 @@ PARAM-DESCRIPTION as the expected description of the parameter."
   (let* ((response `((result . ,result)))
          (text (mcp-server-lib-ert-check-text-response response)))
     (should (string= expected-text text))))
+
+(defun mcp-server-lib-test--check-non-string-return-error (handler-func tool-id request-id expected-type)
+  "Test that a tool handler returning non-string value throws type validation error.
+HANDLER-FUNC is the test handler function that returns a non-string value.
+TOOL-ID is the tool identifier string.
+REQUEST-ID is the JSON-RPC request ID.
+EXPECTED-TYPE is the expected type name in the error message."
+  (mcp-server-lib-test--with-tools
+      ((handler-func
+        :id tool-id
+        :description (format "A tool that returns %s (violates protocol)" expected-type)))
+    (mcp-server-lib-test--check-jsonrpc-error
+     (mcp-server-lib-create-tools-call-request tool-id request-id)
+     mcp-server-lib-jsonrpc-error-invalid-params
+     (format "Tool handler must return string or nil, got: %s" expected-type))))
 
 ;;; Initialization and server capabilities tests
 
@@ -1291,6 +1322,38 @@ from a function loaded from bytecode rather than interpreted elisp."
            (text
             (mcp-server-lib-ert-check-text-response response)))
       (should (string= "" text)))))
+
+(ert-deftest mcp-server-lib-test-tools-call-handler-returns-non-string ()
+  "Test tool handler that returns non-string value throws error."
+  (mcp-server-lib-test--check-non-string-return-error
+   #'mcp-server-lib-test--tool-handler-returns-list
+   "list-returning-tool"
+   15
+   "cons"))
+
+(ert-deftest mcp-server-lib-test-tools-call-handler-returns-vector ()
+  "Test tool handler that returns vector throws type validation error."
+  (mcp-server-lib-test--check-non-string-return-error
+   #'mcp-server-lib-test--tool-handler-returns-vector
+   "vector-returning-tool"
+   16
+   "vector"))
+
+(ert-deftest mcp-server-lib-test-tools-call-handler-returns-number ()
+  "Test tool handler that returns number throws type validation error."
+  (mcp-server-lib-test--check-non-string-return-error
+   #'mcp-server-lib-test--tool-handler-returns-number
+   "number-returning-tool"
+   17
+   "integer"))
+
+(ert-deftest mcp-server-lib-test-tools-call-handler-returns-symbol ()
+  "Test tool handler that returns symbol throws type validation error."
+  (mcp-server-lib-test--check-non-string-return-error
+   #'mcp-server-lib-test--tool-handler-returns-symbol
+   "symbol-returning-tool"
+   18
+   "symbol"))
 
 (ert-deftest mcp-server-lib-test-tools-call-handler-undefined ()
   "Test calling a tool whose handler function no longer exists."

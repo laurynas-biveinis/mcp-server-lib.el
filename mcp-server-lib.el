@@ -777,8 +777,20 @@ METHOD-METRICS is used to track errors for this method."
                                  (intern param-name) tool-args)))
                           (push value arg-values)))
                       (apply handler (nreverse arg-values))))
-                   ;; Ensure result is a string, convert nil to empty string
-                   (result-text (or result ""))
+                   ;; Ensure result is a string, convert nil to empty string, error on other types
+                   (result-text
+                    (cond
+                     ((null result)
+                      "")
+                     ((stringp result)
+                      result)
+                     (t
+                      (signal
+                       'mcp-server-lib-invalid-params
+                       (list
+                        (format
+                         "Tool handler must return string or nil, got: %s"
+                         (type-of result)))))))
                    ;; Wrap the handler result in the MCP format
                    (formatted-result
                     `((content
