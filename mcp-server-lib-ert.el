@@ -375,6 +375,28 @@ EXPECTED-FIELDS is an alist of (field . value) pairs to verify in the content."
                (equal
                 (alist-get (car field) content) (cdr field))))))))))
 
+(defun mcp-server-lib-ert-call-tool (tool-name params)
+  "Call TOOL-NAME with PARAMS and return the text content string.
+Handles all error checking and response extraction automatically.
+Verifies metrics show success (+1 call, +0 errors) at method and tool levels.
+Signals test failure if JSON-RPC or MCP errors occur.
+
+Arguments:
+  TOOL-NAME - String name of the tool to call
+  PARAMS - Alist of parameters to pass to the tool, or nil for no parameters
+
+Returns:
+  The text content string from the tool response"
+  (let ((tool-metrics-key (format "tools/call:%s" tool-name)))
+    (mcp-server-lib-ert-with-metrics-tracking
+        (("tools/call" 1 0)
+         (tool-metrics-key 1 0))
+      (let* ((request (mcp-server-lib-create-tools-call-request 
+                       tool-name nil params))
+             (response (mcp-server-lib-process-jsonrpc-parsed request)))
+        (should-not (alist-get 'error response))
+        (mcp-server-lib-ert-check-text-response response)))))
+
 (provide 'mcp-server-lib-ert)
 
 ;; Local Variables:

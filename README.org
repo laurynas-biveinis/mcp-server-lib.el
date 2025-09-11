@@ -282,6 +282,13 @@ The =mcp-server-lib-ert= module provides utilities for writing ERT tests for MCP
   ;; tools contains the result field from the response
   (should (arrayp tools)))
 
+;; High-level tool testing helper - simplifies tool calls
+;; This function combines request creation, processing, metrics verification,
+;; and text extraction into a single call
+(let* ((params '(("name" . "John") ("greeting" . "Hello")))
+       (result (mcp-server-lib-ert-call-tool "greet-user" params)))
+  (should (string= "Hello, John!" result)))
+
 ;; Get resource list (convenience function)
 (let ((resources (mcp-server-lib-ert-get-resource-list)))
   (should (= 2 (length resources)))

@@ -603,7 +603,7 @@ EXPECTED-TYPE is the expected type name in the error message."
     (mcp-server-lib-test--check-jsonrpc-error
      (mcp-server-lib-create-tools-call-request tool-id request-id)
      mcp-server-lib-jsonrpc-error-invalid-params
-     (format "MCP invalid parameters: \"Tool handler must return string or nil, got: %s\"" expected-type))))
+     (format "Tool handler must return string or nil, got: %s" expected-type))))
 
 ;;; Initialization and server capabilities tests
 
@@ -1082,9 +1082,8 @@ from a function loaded from bytecode rather than interpreted elisp."
         :id "two-params"
         :description "A tool that requires two arguments"))
     (let* ((args '((first-name . "John") (last-name . "Doe")))
-           (result (mcp-server-lib-test--call-tool "two-params" 42 args)))
-      (mcp-server-lib-test--check-mcp-server-lib-content-format
-       result "Hello, John Doe!"))))
+           (result (mcp-server-lib-ert-call-tool "two-params" args)))
+      (should (string= "Hello, John Doe!" result)))))
 
 (ert-deftest mcp-server-lib-test-tools-call-three-param-handler ()
   "Test invoking a tool with three parameters."
@@ -1093,9 +1092,8 @@ from a function loaded from bytecode rather than interpreted elisp."
         :id "three-params"
         :description "A tool that requires three arguments"))
     (let* ((args '((title . "Dr") (first-name . "Jane") (last-name . "Smith")))
-           (result (mcp-server-lib-test--call-tool "three-params" 99 args)))
-      (mcp-server-lib-test--check-mcp-server-lib-content-format
-       result "Hello, Dr Jane Smith!"))))
+           (result (mcp-server-lib-ert-call-tool "three-params" args)))
+      (should (string= "Hello, Dr Jane Smith!" result)))))
 
 (ert-deftest mcp-server-lib-test-tools-call-missing-required-param ()
   "Test that calling a multi-param tool with missing parameters returns an error."
@@ -1270,10 +1268,8 @@ from a function loaded from bytecode rather than interpreted elisp."
       ((#'mcp-server-lib-test--tool-handler-string-list
         :id "string-list-tool"
         :description "A tool that returns a string with items"))
-    (let ((result
-           (mcp-server-lib-test--call-tool "string-list-tool" 9)))
-      (mcp-server-lib-test--check-mcp-server-lib-content-format
-       result mcp-server-lib-test--string-list-result))))
+    (let ((result (mcp-server-lib-ert-call-tool "string-list-tool" nil)))
+      (should (string= mcp-server-lib-test--string-list-result result)))))
 
 (ert-deftest mcp-server-lib-test-tools-call-empty-string ()
   "Test the `tools/call` request with a tool that returns an empty string."
@@ -1283,10 +1279,8 @@ from a function loaded from bytecode rather than interpreted elisp."
         :description "A tool that returns an empty string"))
     (mcp-server-lib-test--verify-tool-schema-in-single-tool-list)
 
-    (let ((result
-           (mcp-server-lib-test--call-tool "empty-string-tool" 10)))
-      (mcp-server-lib-test--check-mcp-server-lib-content-format
-       result ""))))
+    (let ((result (mcp-server-lib-ert-call-tool "empty-string-tool" nil)))
+      (should (string= "" result)))))
 
 (ert-deftest mcp-server-lib-test-tools-call-with-string-arg ()
   "Test the `tools/call` request with a tool that takes a string argument."
@@ -1297,12 +1291,8 @@ from a function loaded from bytecode rather than interpreted elisp."
     (let* ((test-input "Hello, world!")
            (args `(("input-string" . ,test-input))))
 
-      (let ((result
-             (mcp-server-lib-test--call-tool "string-arg-tool"
-                                             13
-                                             args)))
-        (mcp-server-lib-test--check-mcp-server-lib-content-format
-         result (concat "Echo: " test-input))))))
+      (let ((result (mcp-server-lib-ert-call-tool "string-arg-tool" args)))
+        (should (string= (concat "Echo: " test-input) result))))))
 
 (ert-deftest mcp-server-lib-test-tools-call-unregistered-tool ()
   "Test the `tools/call` request with a tool that was never registered."

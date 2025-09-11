@@ -808,7 +808,7 @@ METHOD-METRICS is used to track errors for this method."
              (mcp-server-lib--jsonrpc-error
               id
               mcp-server-lib-jsonrpc-error-invalid-params
-              (error-message-string err)))
+              (cadr err)))
             ;; Handle tool-specific errors thrown with
             ;; mcp-server-lib-tool-throw
             (mcp-server-lib-tool-error
