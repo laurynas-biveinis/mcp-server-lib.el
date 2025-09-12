@@ -168,9 +168,23 @@ Example:
     ;; tools now contains the tools array from the response
     (should (arrayp tools)))"
   (mcp-server-lib-ert-verify-req-success method
-    (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed request)))
-      (should-not (alist-get 'error resp-obj))
-      (alist-get 'result resp-obj))))
+    (let* ((resp-obj (mcp-server-lib-process-jsonrpc-parsed request))
+           (response-keys (mapcar #'car resp-obj)))
+      ;; Verify response has exactly 3 fields: jsonrpc, id, result
+      (should (= 3 (length response-keys)))
+      (should (member 'jsonrpc response-keys))
+      (should (member 'id response-keys))
+      (should (member 'result response-keys))
+      ;; Verify jsonrpc version
+      (should (string= "2.0" (alist-get 'jsonrpc resp-obj)))
+      ;; Verify id exists (can be number or string)
+      (let ((id (alist-get 'id resp-obj)))
+        (should id)
+        (should (or (numberp id) (stringp id))))
+      ;; Return the result
+      (let ((result (alist-get 'result resp-obj)))
+        (should result)
+        result))))
 
 (defun mcp-server-lib-ert--get-initialize-result ()
   "Send an MCP \\='initialize request and return its result.
