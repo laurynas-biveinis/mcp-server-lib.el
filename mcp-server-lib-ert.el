@@ -403,6 +403,22 @@ Returns:
         (should-not (alist-get 'error response))
         (mcp-server-lib-ert-check-text-response response)))))
 
+(defun mcp-server-lib-ert-process-tool-response (response)
+  "Process MCP tool response from JSON-RPC, handling both success and error cases.
+RESPONSE is the parsed JSON-RPC response from a tool call.
+Returns parsed JSON on success, signals `mcp-server-lib-tool-error' on failure.
+
+This function validates the response structure and handles the standard
+MCP tool response format with isError flag and content array."
+  (let* ((mcp-result (mcp-server-lib-ert--validate-jsonrpc-response response 'result))
+         (is-error (eq (alist-get 'isError mcp-result) t))
+         (result-text (mcp-server-lib-ert-check-text-response response is-error)))
+    (if is-error
+        ;; Tool returned an error - signal it
+        (signal 'mcp-server-lib-tool-error (list result-text))
+      ;; Success case - parse the JSON result
+      (json-read-from-string result-text))))
+
 (provide 'mcp-server-lib-ert)
 
 ;; Local Variables:

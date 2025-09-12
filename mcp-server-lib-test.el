@@ -1359,6 +1359,59 @@ from a function loaded from bytecode rather than interpreted elisp."
          mcp-server-lib-jsonrpc-error-internal "Internal error executing tool: Symbol’s function definition is void: mcp-server-lib-test--handler-to-be-undefined")))))
 
 
+;;; `mcp-server-lib-ert-process-tool-response' tests
+
+(ert-deftest mcp-server-lib-test-ert-process-tool-response-success ()
+  "Test that `mcp-server-lib-ert-process-tool-response' correctly parses JSON from successful tool response."
+  ;; Create a mock successful tool response with JSON content
+  (let* ((json-data '((status . "ok") (count . 42) (items . ["a" "b" "c"])))
+         (json-string (json-encode json-data))
+         (response `((jsonrpc . "2.0")
+                     (id . 123)
+                     (result . ((content . [((type . "text")
+                                              (text . ,json-string))])
+                                (isError . :json-false)))))
+         (parsed-result (mcp-server-lib-ert-process-tool-response response)))
+    ;; Verify the parsed JSON matches expected structure
+    (should (equal "ok" (alist-get 'status parsed-result)))
+    (should (equal 42 (alist-get 'count parsed-result)))
+    (should (equal ["a" "b" "c"] (alist-get 'items parsed-result)))))
+
+(ert-deftest mcp-server-lib-test-ert-process-tool-response-error ()
+  "Test that `mcp-server-lib-ert-process-tool-response' signals error when isError is true."
+  ;; Create a mock error response from tool
+  (let* ((error-message "Tool execution failed: File not found")
+         (response `((jsonrpc . "2.0")
+                     (id . 456)
+                     (result . ((content . [((type . "text")
+                                              (text . ,error-message))])
+                                (isError . t))))))
+    ;; Verify that it signals the expected error with correct message
+    (should-error
+     (mcp-server-lib-ert-process-tool-response response)
+     :type 'mcp-server-lib-tool-error)
+    ;; Check the error message is preserved
+    (condition-case err
+        (mcp-server-lib-ert-process-tool-response response)
+      (mcp-server-lib-tool-error
+       (should (string= error-message (car (cdr err))))))))
+
+(ert-deftest mcp-server-lib-test-ert-process-tool-response-invalid ()
+  "Test that `mcp-server-lib-ert-process-tool-response' fails on invalid response structure."
+  ;; Test with JSON-RPC error present
+  (let ((response-with-error `((jsonrpc . "2.0")
+                                (id . 789)
+                                (error . ((code . -32600)
+                                          (message . "Invalid Request"))))))
+    (should-error
+     (mcp-server-lib-ert-process-tool-response response-with-error)))
+  
+  ;; Test with missing result field
+  (let ((response-no-result `((jsonrpc . "2.0")
+                               (id . 789))))
+    (should-error
+     (mcp-server-lib-ert-process-tool-response response-no-result))))
+
 ;;; `mcp-server-lib-process-jsonrpc' tests
 
 (ert-deftest mcp-server-lib-test-parse-error ()
