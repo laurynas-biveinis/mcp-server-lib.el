@@ -130,6 +130,27 @@ Example:
        (nreverse after-checks)
        ,result-var)))
 
+(defun mcp-server-lib-ert--validate-jsonrpc-response
+    (response expected-payload-field &optional expected-id)
+  "Validate JSON-RPC RESPONSE structure and return payload field.
+EXPECTED-PAYLOAD-FIELD should be either \\='result or \\='error.
+If EXPECTED-ID is provided, validates that the response ID matches it.
+Returns the value of the expected payload field."
+  (should (memq expected-payload-field '(result error)))
+  (let ((response-keys (mapcar #'car response))
+        (payload (alist-get expected-payload-field response)))
+    (should (= 3 (length response-keys)))
+    (should (member 'jsonrpc response-keys))
+    (should (member 'id response-keys))
+    (should payload)
+    (should (string= "2.0" (alist-get 'jsonrpc response)))
+    ;; Verify id field exists (value can be nil for error responses)
+    (should (assq 'id response))
+    (when expected-id
+      (let ((id (alist-get 'id response)))
+        (should (equal expected-id id))))
+    payload))
+
 (defmacro mcp-server-lib-ert-verify-req-success (method &rest body)
   "Execute BODY and verify METHOD metrics show success (+1 call, +0 errors).
 Captures metrics before BODY execution and asserts after that:
@@ -168,23 +189,8 @@ Example:
     ;; tools now contains the tools array from the response
     (should (arrayp tools)))"
   (mcp-server-lib-ert-verify-req-success method
-    (let* ((resp-obj (mcp-server-lib-process-jsonrpc-parsed request))
-           (response-keys (mapcar #'car resp-obj)))
-      ;; Verify response has exactly 3 fields: jsonrpc, id, result
-      (should (= 3 (length response-keys)))
-      (should (member 'jsonrpc response-keys))
-      (should (member 'id response-keys))
-      (should (member 'result response-keys))
-      ;; Verify jsonrpc version
-      (should (string= "2.0" (alist-get 'jsonrpc resp-obj)))
-      ;; Verify id exists (can be number or string)
-      (let ((id (alist-get 'id resp-obj)))
-        (should id)
-        (should (or (numberp id) (stringp id))))
-      ;; Return the result
-      (let ((result (alist-get 'result resp-obj)))
-        (should result)
-        result))))
+    (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed request)))
+      (mcp-server-lib-ert--validate-jsonrpc-response resp-obj 'result))))
 
 (defun mcp-server-lib-ert--get-initialize-result ()
   "Send an MCP \\='initialize request and return its result.
@@ -329,12 +335,8 @@ Example:
 (defun mcp-server-lib-ert-check-error-object
     (response expected-code expected-message)
   "Check that RESPONSE has error with EXPECTED-CODE and EXPECTED-MESSAGE."
-  ;; Check that response contains only standard JSON-RPC fields plus error
-  (should (equal 3 (length response))) ; jsonrpc, id, error
-  (should (equal "2.0" (alist-get 'jsonrpc response)))
-  (should (assq 'id response))
-  (let ((error-obj (alist-get 'error response)))
-    (should error-obj)
+  (let ((error-obj (mcp-server-lib-ert--validate-jsonrpc-response
+                    response 'error)))
     (should (equal expected-code (alist-get 'code error-obj)))
     (should (equal expected-message (alist-get 'message error-obj)))))
 
@@ -355,39 +357,29 @@ Example:
 EXPECTED-FIELDS is an alist of (field . value) pairs to verify in the content."
   (mcp-server-lib-ert-verify-req-success "resources/read"
     (let* ((response (mcp-server-lib-ert--read-resource uri))
-           (response-keys (mapcar #'car response)))
-      ;; Check response has exactly the expected fields
-      (should (= 3 (length response-keys)))
-      (should (member 'jsonrpc response-keys))
-      (should (member 'id response-keys))
-      (should (member 'result response-keys))
-      ;; Check response field values
-      (should (string= "2.0" (alist-get 'jsonrpc response)))
-      (should
-       (equal
-        mcp-server-lib-ert--resource-read-request-id
-        (alist-get 'id response)))
+           (result (mcp-server-lib-ert--validate-jsonrpc-response
+                    response 'result
+                    mcp-server-lib-ert--resource-read-request-id))
+           (result-keys (mapcar #'car result)))
       ;; Check result structure
-      (let* ((result (alist-get 'result response))
-             (result-keys (mapcar #'car result)))
-        (should (= 1 (length result-keys)))
-        (should (member 'contents result-keys))
-        ;; Check contents array
-        (let ((contents (alist-get 'contents result)))
-          (should (arrayp contents))
-          (should (= 1 (length contents)))
-          ;; Check content item structure
-          (let* ((content (aref contents 0))
-                 (content-keys (mapcar #'car content)))
-            ;; Verify exact field count
+      (should (= 1 (length result-keys)))
+      (should (member 'contents result-keys))
+      ;; Check contents array
+      (let ((contents (alist-get 'contents result)))
+        (should (arrayp contents))
+        (should (= 1 (length contents)))
+        ;; Check content item structure
+        (let* ((content (aref contents 0))
+               (content-keys (mapcar #'car content)))
+          ;; Verify exact field count
+          (should
+           (= (length expected-fields) (length content-keys)))
+          ;; Verify each expected field exists and has correct value
+          (dolist (field expected-fields)
+            (should (member (car field) content-keys))
             (should
-             (= (length expected-fields) (length content-keys)))
-            ;; Verify each expected field exists and has correct value
-            (dolist (field expected-fields)
-              (should (member (car field) content-keys))
-              (should
-               (equal
-                (alist-get (car field) content) (cdr field))))))))))
+             (equal
+              (alist-get (car field) content) (cdr field)))))))))
 
 (defun mcp-server-lib-ert-call-tool (tool-name params)
   "Call TOOL-NAME with PARAMS and return the text content string.
