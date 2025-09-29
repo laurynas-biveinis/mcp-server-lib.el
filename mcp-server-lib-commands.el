@@ -142,6 +142,15 @@ Returns the function name for symbols, \"lambda\" for lambdas,
       (if (symbolp name)
           (symbol-name name)
         "compiled-function")))
+   ;; In Emacs 30.1+, interpreted lambdas with lexical binding are
+   ;; represented as interpreted-function objects, not lists
+   ((and (fboundp 'interpreted-function-p)
+         (interpreted-function-p handler))
+    "closure")
+   ;; In Emacs 30.1+, closurep covers both interpreted and compiled closures
+   ((and (fboundp 'closurep) (closurep handler))
+    "closure")
+   ;; For older Emacs versions, check list-based representations
    ((and (listp handler) (eq (car handler) 'lambda))
     "lambda")
    ((and (listp handler) (eq (car handler) 'closure))
