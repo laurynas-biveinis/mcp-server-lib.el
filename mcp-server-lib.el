@@ -36,6 +36,7 @@
 ;;
 ;; Additional commands:
 ;; - M-x mcp-server-lib-stop: Stop the MCP server
+;; - M-x mcp-server-lib-describe-setup: View registered tools and resources
 ;; - M-x mcp-server-lib-show-metrics: View usage statistics
 ;; - M-x mcp-server-lib-uninstall: Remove the stdio transport script
 ;;
@@ -222,7 +223,7 @@ Extracts parameter descriptions from the docstring if available."
           `((type . "object")
             (properties . ,(nreverse properties))
             (required . ,(vconcat (nreverse required)))))
-      ;; No arguments case  
+      ;; No arguments case
       '((type . "object")))))
 
 (defun mcp-server-lib--ref-counted-register (key item table)
@@ -777,7 +778,7 @@ METHOD-METRICS is used to track errors for this method."
                                  (intern param-name) tool-args)))
                           (push value arg-values)))
                       (apply handler (nreverse arg-values))))
-                   ;; Ensure result is a string, convert nil to empty string, error on other types
+                   ;; Ensure result is string or nil, error on other types
                    (result-text
                     (cond
                      ((null result)

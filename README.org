@@ -40,7 +40,12 @@ If you're using an MCP server built with this library:
 2. The script will be at =~/.emacs.d/emacs-mcp-stdio.sh=
 3. Follow your MCP server's documentation for client registration
 
-To uninstall: =M-x mcp-server-lib-uninstall=
+Available commands:
+- =M-x mcp-server-lib-start= - Start the MCP server
+- =M-x mcp-server-lib-stop= - Stop the MCP server
+- =M-x mcp-server-lib-describe-setup= - View registered tools and resources with usage statistics
+- =M-x mcp-server-lib-show-metrics= - View usage metrics
+- =M-x mcp-server-lib-uninstall= - Remove the stdio script
 
 * For Developers
 

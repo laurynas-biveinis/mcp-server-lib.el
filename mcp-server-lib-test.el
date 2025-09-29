@@ -44,6 +44,90 @@
 (defconst mcp-server-lib-test--unregister-tool-id "test-unregister"
   "Tool ID used for testing tool unregistration.")
 
+(defconst mcp-server-lib-test--describe-setup-stopped-regexp
+  (concat
+   "\\`"  ; Start of buffer
+   "MCP Server Setup\n\n"
+   "Status: Stopped\n\n"
+   "\\'")
+  "Regexp to match describe-setup output when server is stopped.")
+
+(defconst mcp-server-lib-test--describe-setup-comprehensive-regexp
+  (concat
+   ;; Start of buffer, header and status
+   "\\`MCP Server Setup\n\n"
+   "Status: Running\n\n"
+   ;; Tools section with alphabetical order
+   "Tools:\n"
+   ;; Apple tool with all its properties
+   "\\s-+apple-tool\n"
+   "\\s-+Description: Apple test tool\n"
+   "\\s-+Title: Apple Tool Title\n"
+   "\\s-+Handler: mcp-server-lib-test--tool-handler-empty-string\n"
+   "\\s-+Usage: [0-9]+ calls\\(?:, [0-9]+ errors\\)?\n"
+   "\n"  ; Blank line between tools
+   ;; Mouse tool with all its properties
+   "\\s-+mouse-tool\n"
+   "\\s-+Description: Mouse test tool with lambda handler\n"
+   "\\s-+Handler: closure\n"
+   "\\s-+Usage: [0-9]+ calls\\(?:, [0-9]+ errors\\)?\n"
+   "\n"  ; Blank line between tools
+   ;; Zebra tool with all its properties
+   "\\s-+zebra-tool\n"
+   "\\s-+Description: Zebra test tool\n"
+   "\\s-+Title: Zebra Tool Title\n"
+   "\\s-+Read-only: t\n"
+   "\\s-+Handler: mcp-server-lib-test--tool-handler-returns-vector\n"
+   "\\s-+Usage: [0-9]+ calls\\(?:, [0-9]+ errors\\)?\n"
+   "\n\n"  ; Two blank lines before resources
+   ;; Resources section with alphabetical order
+   "Resources:\n"
+   ;; Apple resource with all its properties
+   "\\s-+apple://resource\n"
+   "\\s-+Name: Apple Resource\n"
+   "\\s-+Description: Apple resource description\n"
+   "\\s-+Mime-Type: application/json\n"
+   "\\s-+Handler: closure\n"
+   "\\s-+Usage: [0-9]+ calls\\(?:, [0-9]+ errors\\)?\n"
+   "\n"  ; Blank line between resources
+   ;; Mouse resource with all its properties
+   "\\s-+mouse://resource\n"
+   "\\s-+Name: Mouse Resource\n"
+   "\\s-+Mime-Type: text/plain\n"
+   "\\s-+Handler: mcp-server-lib-test--return-string\n"
+   "\\s-+Usage: [0-9]+ calls\\(?:, [0-9]+ errors\\)?\n"
+   "\n"  ; Blank line between resources
+   ;; Zebra resource with all its properties
+   "\\s-+zebra://resource\n"
+   "\\s-+Name: Zebra Resource\n"
+   "\\s-+Description: Zebra resource description\n"
+   "\\s-+Mime-Type: text/plain\n"
+   "\\s-+Handler: mcp-server-lib-test--return-string\n"
+   "\\s-+Usage: [0-9]+ calls\\(?:, [0-9]+ errors\\)?\n"
+   "\n\\'")
+  "Regexp to match comprehensive describe-setup output with tools and resources.")
+
+(defconst mcp-server-lib-test--describe-setup-empty-regexp
+  (concat
+   "\\`"  ; Start of buffer
+   "MCP Server Setup\n\n"
+   "Status: Running\n\n"
+   "\\'")
+  "Regexp to match describe-setup output for empty state (no tools/resources).")
+
+(defconst mcp-server-lib-test--describe-setup-nil-metrics-regexp
+  (concat
+   "\\`"  ; Start of buffer
+   "MCP Server Setup\n\n"
+   "Status: Running\n\n"
+   "Tools:\n"
+   "  test-tool\n"
+   "    Description: Test tool\n"
+   "    Handler: mcp-server-lib-test--return-string\n"
+   "    Usage: 0 calls\n\n"
+   "\\'")
+  "Regexp to match describe-setup output with nil metrics (0 calls).")
+
 ;;; Generic test handlers
 
 (defun mcp-server-lib-test--return-string ()
@@ -604,6 +688,21 @@ EXPECTED-TYPE is the expected type name in the error message."
      (mcp-server-lib-create-tools-call-request tool-id request-id)
      mcp-server-lib-jsonrpc-error-invalid-params
      (format "Tool handler must return string or nil, got: %s" expected-type))))
+
+(defmacro mcp-server-lib-test--do-describe-setup-test (pattern &rest body)
+  "Execute BODY with MCP Server Setup buffer and assert it matches PATTERN.
+PATTERN should be a regexp string to match against the buffer contents.
+BODY forms are executed with the *MCP Server Setup* buffer as current buffer."
+  (declare (indent 1) (debug t))
+  `(unwind-protect
+       (progn
+         (mcp-server-lib-describe-setup)
+         (with-current-buffer "*MCP Server Setup*"
+           ,@body
+           (let ((content (buffer-string)))
+             (should (string-match-p ,pattern content)))))
+     (when (get-buffer "*MCP Server Setup*")
+       (kill-buffer "*MCP Server Setup*"))))
 
 ;;; Initialization and server capabilities tests
 
@@ -1537,6 +1636,58 @@ from a function loaded from bytecode rather than interpreted elisp."
   (should (commandp #'mcp-server-lib-uninstall))
   (should (commandp #'mcp-server-lib-reset-metrics))
   (should (commandp #'mcp-server-lib-show-metrics)))
+
+(ert-deftest mcp-server-lib-test-describe-setup-shows-stopped-status ()
+  "Test that describe-setup shows stopped status when server is stopped."
+  (mcp-server-lib-test--do-describe-setup-test
+   mcp-server-lib-test--describe-setup-stopped-regexp))
+
+(ert-deftest mcp-server-lib-test-describe-setup-comprehensive ()
+  "Test describe-setup with running status, sorted tools with properties/stats, sorted resources with properties, and different handler types."
+  (mcp-server-lib-test--with-tools
+   ((#'mcp-server-lib-test--tool-handler-returns-vector :id "zebra-tool" :description "Zebra test tool"
+                                                        :title "Zebra Tool Title" :read-only t)
+    (#'mcp-server-lib-test--tool-handler-empty-string :id "apple-tool" :description "Apple test tool"
+                                                      :title "Apple Tool Title")
+    ((lambda () "Mouse tool result") :id "mouse-tool" :description "Mouse test tool with lambda handler"))
+   (mcp-server-lib-test--register-resource
+    "zebra://resource"
+    #'mcp-server-lib-test--return-string
+    :name "Zebra Resource"
+    :description "Zebra resource description"
+    (mcp-server-lib-test--register-resource
+     "apple://resource"
+     (lambda () "Apple resource content")
+     :name "Apple Resource"
+     :description "Apple resource description"
+     :mime-type "application/json"
+     (mcp-server-lib-test--register-resource
+      "mouse://resource"
+      #'mcp-server-lib-test--return-string
+      :name "Mouse Resource"
+      :mime-type "text/plain"
+      ;; Call some tools to generate metrics
+      (dotimes (_ 42)
+        (ignore-errors  ; Ignore errors from handlers that return non-strings
+          (mcp-server-lib-ert-call-tool "apple-tool" nil)))
+      (dotimes (_ 10)
+        (ignore-errors
+          (mcp-server-lib-ert-call-tool "zebra-tool" nil)))
+      (mcp-server-lib-test--do-describe-setup-test
+       mcp-server-lib-test--describe-setup-comprehensive-regexp))))))
+
+(ert-deftest mcp-server-lib-test-describe-setup-empty-state ()
+  "Test that describe-setup handles empty state correctly."
+  (mcp-server-lib-ert-with-server :tools nil :resources nil
+    (mcp-server-lib-test--do-describe-setup-test
+     mcp-server-lib-test--describe-setup-empty-regexp)))
+
+(ert-deftest mcp-server-lib-test-describe-setup-nil-metrics ()
+  "Test that describe-setup handles nil metrics correctly."
+  (mcp-server-lib-test--with-tools
+   ((#'mcp-server-lib-test--return-string :id "test-tool" :description "Test tool"))
+   (mcp-server-lib-test--do-describe-setup-test
+    mcp-server-lib-test--describe-setup-nil-metrics-regexp)))
 
 ;;; `mcp-server-lib-with-error-handling' tests
 

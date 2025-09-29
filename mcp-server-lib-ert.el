@@ -190,7 +190,8 @@ Example:
     (should (arrayp tools)))"
   (mcp-server-lib-ert-verify-req-success method
     (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed request)))
-      (mcp-server-lib-ert--validate-jsonrpc-response resp-obj 'result))))
+      (mcp-server-lib-ert--validate-jsonrpc-response
+       resp-obj 'result))))
 
 (defun mcp-server-lib-ert--get-initialize-result ()
   "Send an MCP \\='initialize request and return its result.
@@ -335,8 +336,9 @@ Example:
 (defun mcp-server-lib-ert-check-error-object
     (response expected-code expected-message)
   "Check that RESPONSE has error with EXPECTED-CODE and EXPECTED-MESSAGE."
-  (let ((error-obj (mcp-server-lib-ert--validate-jsonrpc-response
-                    response 'error)))
+  (let ((error-obj
+         (mcp-server-lib-ert--validate-jsonrpc-response
+          response 'error)))
     (should (equal expected-code (alist-get 'code error-obj)))
     (should (equal expected-message (alist-get 'message error-obj)))))
 
@@ -357,9 +359,10 @@ Example:
 EXPECTED-FIELDS is an alist of (field . value) pairs to verify in the content."
   (mcp-server-lib-ert-verify-req-success "resources/read"
     (let* ((response (mcp-server-lib-ert--read-resource uri))
-           (result (mcp-server-lib-ert--validate-jsonrpc-response
-                    response 'result
-                    mcp-server-lib-ert--resource-read-request-id))
+           (result
+            (mcp-server-lib-ert--validate-jsonrpc-response
+             response 'result
+             mcp-server-lib-ert--resource-read-request-id))
            (result-keys (mapcar #'car result)))
       ;; Check result structure
       (should (= 1 (length result-keys)))
@@ -372,8 +375,7 @@ EXPECTED-FIELDS is an alist of (field . value) pairs to verify in the content."
         (let* ((content (aref contents 0))
                (content-keys (mapcar #'car content)))
           ;; Verify exact field count
-          (should
-           (= (length expected-fields) (length content-keys)))
+          (should (= (length expected-fields) (length content-keys)))
           ;; Verify each expected field exists and has correct value
           (dolist (field expected-fields)
             (should (member (car field) content-keys))
@@ -394,25 +396,29 @@ Arguments:
 Returns:
   The text content string from the tool response"
   (let ((tool-metrics-key (format "tools/call:%s" tool-name)))
-    (mcp-server-lib-ert-with-metrics-tracking
-        (("tools/call" 1 0)
-         (tool-metrics-key 1 0))
-      (let* ((request (mcp-server-lib-create-tools-call-request 
-                       tool-name nil params))
-             (response (mcp-server-lib-process-jsonrpc-parsed request)))
+    (mcp-server-lib-ert-with-metrics-tracking (("tools/call" 1 0)
+                                               (tool-metrics-key 1 0))
+      (let* ((request
+              (mcp-server-lib-create-tools-call-request
+               tool-name nil params))
+             (response
+              (mcp-server-lib-process-jsonrpc-parsed request)))
         (should-not (alist-get 'error response))
         (mcp-server-lib-ert-check-text-response response)))))
 
 (defun mcp-server-lib-ert-process-tool-response (response)
-  "Process MCP tool response from JSON-RPC, handling both success and error cases.
+  "Process MCP tool response, handling success and error cases.
 RESPONSE is the parsed JSON-RPC response from a tool call.
 Returns parsed JSON on success, signals `mcp-server-lib-tool-error' on failure.
 
 This function validates the response structure and handles the standard
 MCP tool response format with isError flag and content array."
-  (let* ((mcp-result (mcp-server-lib-ert--validate-jsonrpc-response response 'result))
+  (let* ((mcp-result
+          (mcp-server-lib-ert--validate-jsonrpc-response
+           response 'result))
          (is-error (eq (alist-get 'isError mcp-result) t))
-         (result-text (mcp-server-lib-ert-check-text-response response is-error)))
+         (result-text
+          (mcp-server-lib-ert-check-text-response response is-error)))
     (if is-error
         ;; Tool returned an error - signal it
         (signal 'mcp-server-lib-tool-error (list result-text))

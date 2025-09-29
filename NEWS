@@ -3,6 +3,11 @@ mcp-server-lib.el NEWS -- history of user-visible changes
 * Changes in mcp-server-lib 0.2.0 (unreleased)
 
 ** New Features
+*** New command to inspect MCP server setup
+    M-x mcp-server-lib-describe-setup shows all registered tools, resources,
+    and resource templates along with their properties, handler functions, and
+    usage statistics.
+
 *** Multi-parameter tool support
     Tools can now accept multiple parameters. The library automatically maps
     JSON object fields to function parameters using camelCase to kebab-case
