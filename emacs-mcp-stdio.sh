@@ -38,7 +38,7 @@ if [ -n "$EMACS_MCP_DEBUG_LOG" ]; then
 		local message="$2"
 		local timestamp
 		timestamp=$(date "+%Y-%m-%d %H:%M:%S")
-		echo "[$timestamp] MCP-${direction}: ${message}" >>"$EMACS_MCP_DEBUG_LOG"
+		echo "[$timestamp] [$$] MCP-${direction}: ${message}" >>"$EMACS_MCP_DEBUG_LOG"
 	}
 
 	mcp_debug_log "INFO" "Debug logging enabled"
