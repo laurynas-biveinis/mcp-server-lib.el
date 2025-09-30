@@ -95,12 +95,17 @@ if [ -n "$INIT_FUNCTION" ]; then
 	mcp_debug_log "INIT-CALL" "$INIT_CMD"
 
 	# Execute the command and capture output and return code
-	INIT_OUTPUT=$(eval "$INIT_CMD" 2>&1)
+	init_stderr_file="/tmp/mcp-init-stderr.$$-$(date +%s%N)"
+	INIT_OUTPUT=$(eval "$INIT_CMD" 2>"$init_stderr_file")
 	INIT_RC=$?
 
 	# Log results
 	mcp_debug_log "INIT-RC" "$INIT_RC"
 	mcp_debug_log "INIT-OUTPUT" "$INIT_OUTPUT"
+	if [ -s "$init_stderr_file" ]; then
+		mcp_debug_log "INIT-STDERR" "$(cat "$init_stderr_file")"
+	fi
+	rm -f "$init_stderr_file"
 else
 	mcp_debug_log "INFO" "Skipping init function call (none provided)"
 fi
