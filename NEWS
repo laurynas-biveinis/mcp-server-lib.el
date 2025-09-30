@@ -24,6 +24,13 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     information to MCP clients.
 
 ** Bug Fixes
+*** Fixed MCP Parameters parser for multi-line descriptions
+    The parser now correctly handles multi-line parameter descriptions that
+    contain hyphens (e.g., "org-id://"). Previously, hyphens in continuation
+    lines were incorrectly treated as new parameter definitions. The parser
+    now uses indentation to distinguish parameters (2-4 spaces) from
+    continuation lines (6+ spaces).
+
 *** Enforced tool handler return type validation
     Tool handlers must now return strings or nil. Previously, handlers could
     return any Elisp value which would be serialized, violating the MCP protocol.
