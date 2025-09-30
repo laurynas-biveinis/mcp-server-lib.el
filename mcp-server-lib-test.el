@@ -214,6 +214,82 @@ MCP Parameters:
   last-name - Person's last name"
   (format "Hello, %s %s %s!" title first-name last-name))
 
+(defun mcp-server-lib-test--tool-handler-multiline-param (uri)
+  "Test handler with multi-line parameter description containing hyphens.
+URI is the resource identifier.
+
+MCP Parameters:
+  uri - URI of the headline (org-headline://{absolute-path}#{headline-path}
+        or org-id://{id})"
+  (format "Processing URI: %s" uri))
+
+(defun mcp-server-lib-test--tool-handler-tab-indented-param (input-string)
+  "Test handler with tab-indented parameter documentation.
+INPUT-STRING is the test parameter.
+
+MCP Parameters:
+	input-string - parameter indented with tab character"
+  (concat "Test: " input-string))
+
+(defun mcp-server-lib-test--tool-handler-orphaned-continuation (param1)
+  "Test handler with orphaned continuation line.
+PARAM1 is a parameter.
+
+MCP Parameters:
+      This is an orphaned continuation line
+  param1 - The actual parameter"
+  (format "Result: %s" param1))
+
+(defun mcp-server-lib-test--tool-handler-whitespace-around-hyphen (param1 param2)
+  "Test handler with various whitespace around hyphens.
+PARAM1 and PARAM2 are test parameters.
+
+MCP Parameters:
+  param1   -   multiple spaces around hyphen
+  param2	-	tab characters around hyphen"
+  (format "Results: %s, %s" param1 param2))
+
+(defun mcp-server-lib-test--tool-handler-empty-continuation (param1)
+  "Test handler with empty continuation line.
+PARAM1 is a parameter.
+
+MCP Parameters:
+  param1 - first line
+
+      second line after empty"
+  (format "Result: %s" param1))
+
+(defun mcp-server-lib-test--tool-handler-multiple-continuations (param1)
+  "Test handler with multiple continuation lines.
+PARAM1 is a parameter.
+
+MCP Parameters:
+  param1 - line one
+      line two
+      line three
+      line four"
+  (format "Result: %s" param1))
+
+(defun mcp-server-lib-test--tool-handler-five-space-indent (param1)
+  "Test handler with 5-space indentation line.
+PARAM1 is a parameter.
+
+MCP Parameters:
+  param1 - description
+     this line has 5 spaces and should be ignored
+      but this continuation should work"
+  (format "Result: %s" param1))
+
+(defun mcp-server-lib-test--tool-handler-special-param-chars (param-name param_name param.name)
+  "Test handler with special characters in parameter names.
+PARAM-NAME, PARAM_NAME, and PARAM.NAME are test parameters.
+
+MCP Parameters:
+  param-name - parameter with hyphen
+  param_name - parameter with underscore
+  param.name - parameter with dot"
+  (format "Results: %s, %s, %s" param-name param_name param.name))
+
 (defun mcp-server-lib-test--tool-handler-returns-list ()
   "Test tool handler returning a list."
   '("item1" "item2" "item3"))
@@ -902,6 +978,198 @@ When both are registered, capabilities should include both fields."
     :id "missing-param-tool"
     :description "Tool with missing parameter docs")
    :type 'error))
+
+(ert-deftest mcp-server-lib-test-register-tool-multiline-param ()
+  "Test that multi-line parameter descriptions with hyphens are parsed correctly.
+Regression test for bug where continuation lines with hyphenated words
+like 'org-id' were incorrectly parsed as new parameter definitions."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-multiline-param
+        :id "multiline-param-tool"
+        :description "Tool with multi-line parameter description"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (let* ((result (mcp-server-lib-ert-get-success-result
+                      "tools/list"
+                      (mcp-server-lib-create-tools-list-request)))
+             (tool-list (alist-get 'tools result))
+             (tool (elt tool-list 0))
+             (schema (alist-get 'inputSchema tool))
+             (properties (alist-get 'properties schema))
+             (uri-prop (alist-get 'uri properties)))
+        ;; Verify the schema structure
+        (should (equal "object" (alist-get 'type schema)))
+        ;; Check uri property exists
+        (should uri-prop)
+        (should (equal "string" (alist-get 'type uri-prop)))
+        ;; Check description contains both parts of the multi-line description
+        (let ((desc (alist-get 'description uri-prop)))
+          (should (stringp desc))
+          (should (string-match-p "org-headline://" desc))
+          (should (string-match-p "org-id://" desc)))))))
+
+(ert-deftest mcp-server-lib-test-register-tool-error-tab-indented-param ()
+  "Test that tab-indented parameters are rejected.
+Regression test to ensure spaces-only indentation requirement is enforced."
+  (mcp-server-lib-ert-with-server
+   :tools nil :resources nil
+   (should-error
+    (mcp-server-lib-register-tool
+     #'mcp-server-lib-test--tool-handler-tab-indented-param
+     :id "tab-test"
+     :description "Tool with tab-indented parameter")
+    :type 'error)))
+
+(ert-deftest mcp-server-lib-test-register-tool-error-orphaned-continuation ()
+  "Test that orphaned continuation lines cause an error.
+Regression test to ensure continuation lines before any parameter
+definition are detected and reported with a clear error message."
+  (mcp-server-lib-ert-with-server
+   :tools nil :resources nil
+   (should-error
+    (mcp-server-lib-register-tool
+     #'mcp-server-lib-test--tool-handler-orphaned-continuation
+     :id "orphaned-test"
+     :description "Tool with orphaned continuation")
+    :type 'error)))
+
+(ert-deftest mcp-server-lib-test-register-tool-whitespace-around-hyphen ()
+  "Test that various whitespace around hyphens is handled correctly.
+Regression test to ensure the parser accepts spaces and tabs around
+the hyphen separator in parameter definitions."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-whitespace-around-hyphen
+        :id "whitespace-hyphen-tool"
+        :description "Tool with whitespace around hyphens"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (let* ((result (mcp-server-lib-ert-get-success-result
+                      "tools/list"
+                      (mcp-server-lib-create-tools-list-request)))
+             (tool-list (alist-get 'tools result))
+             (tool (elt tool-list 0))
+             (schema (alist-get 'inputSchema tool))
+             (properties (alist-get 'properties schema))
+             (param1-prop (alist-get 'param1 properties))
+             (param2-prop (alist-get 'param2 properties)))
+        (should (equal "object" (alist-get 'type schema)))
+        (should param1-prop)
+        (should (equal "string" (alist-get 'type param1-prop)))
+        (should (equal "multiple spaces around hyphen"
+                       (alist-get 'description param1-prop)))
+        (should param2-prop)
+        (should (equal "string" (alist-get 'type param2-prop)))
+        (should (equal "tab characters around hyphen"
+                       (alist-get 'description param2-prop)))))))
+
+(ert-deftest mcp-server-lib-test-register-tool-empty-continuation ()
+  "Test that empty continuation lines are handled correctly.
+Regression test to ensure lines with only continuation indentation
+are processed without errors."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-empty-continuation
+        :id "empty-continuation-tool"
+        :description "Tool with empty continuation line"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (let* ((result (mcp-server-lib-ert-get-success-result
+                      "tools/list"
+                      (mcp-server-lib-create-tools-list-request)))
+             (tool-list (alist-get 'tools result))
+             (tool (elt tool-list 0))
+             (schema (alist-get 'inputSchema tool))
+             (properties (alist-get 'properties schema))
+             (param1-prop (alist-get 'param1 properties)))
+        (should (equal "object" (alist-get 'type schema)))
+        (should param1-prop)
+        (should (equal "string" (alist-get 'type param1-prop)))
+        (let ((desc (alist-get 'description param1-prop)))
+          (should (stringp desc))
+          (should (string-match-p "first line" desc))
+          (should (string-match-p "second line after empty" desc)))))))
+
+(ert-deftest mcp-server-lib-test-register-tool-multiple-continuations ()
+  "Test that multiple continuation lines are concatenated correctly.
+Regression test to ensure parser handles 3+ continuation lines
+and concatenates them with spaces."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-multiple-continuations
+        :id "multiple-continuations-tool"
+        :description "Tool with multiple continuation lines"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (let* ((result (mcp-server-lib-ert-get-success-result
+                      "tools/list"
+                      (mcp-server-lib-create-tools-list-request)))
+             (tool-list (alist-get 'tools result))
+             (tool (elt tool-list 0))
+             (schema (alist-get 'inputSchema tool))
+             (properties (alist-get 'properties schema))
+             (param1-prop (alist-get 'param1 properties)))
+        (should (equal "object" (alist-get 'type schema)))
+        (should param1-prop)
+        (should (equal "string" (alist-get 'type param1-prop)))
+        (let ((desc (alist-get 'description param1-prop)))
+          (should (stringp desc))
+          (should (string-match-p "line one" desc))
+          (should (string-match-p "line two" desc))
+          (should (string-match-p "line three" desc))
+          (should (string-match-p "line four" desc)))))))
+
+(ert-deftest mcp-server-lib-test-register-tool-five-space-indent ()
+  "Test that 5-space indentation lines are silently ignored.
+Regression test to ensure lines with 5 spaces (between parameter 2-4
+and continuation 6+) are skipped but parsing continues."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-five-space-indent
+        :id "five-space-indent-tool"
+        :description "Tool with 5-space indentation"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (let* ((result (mcp-server-lib-ert-get-success-result
+                      "tools/list"
+                      (mcp-server-lib-create-tools-list-request)))
+             (tool-list (alist-get 'tools result))
+             (tool (elt tool-list 0))
+             (schema (alist-get 'inputSchema tool))
+             (properties (alist-get 'properties schema))
+             (param1-prop (alist-get 'param1 properties)))
+        (should (equal "object" (alist-get 'type schema)))
+        (should param1-prop)
+        (should (equal "string" (alist-get 'type param1-prop)))
+        (let ((desc (alist-get 'description param1-prop)))
+          (should (stringp desc))
+          (should (string-match-p "description" desc))
+          (should (string-match-p "but this continuation should work" desc))
+          (should-not (string-match-p "5 spaces" desc)))))))
+
+(ert-deftest mcp-server-lib-test-register-tool-special-param-chars ()
+  "Test that special characters in parameter names are handled correctly.
+Regression test to ensure parser accepts valid Elisp identifier characters
+like hyphens, underscores, and dots in parameter names."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-special-param-chars
+        :id "special-param-chars-tool"
+        :description "Tool with special chars in parameter names"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (let* ((result (mcp-server-lib-ert-get-success-result
+                      "tools/list"
+                      (mcp-server-lib-create-tools-list-request)))
+             (tool-list (alist-get 'tools result))
+             (tool (elt tool-list 0))
+             (schema (alist-get 'inputSchema tool))
+             (properties (alist-get 'properties schema))
+             (param-name-prop (alist-get 'param-name properties))
+             (param_name-prop (alist-get 'param_name properties))
+             (param.name-prop (alist-get 'param\.name properties)))
+        (should (equal "object" (alist-get 'type schema)))
+        (should param-name-prop)
+        (should (equal "string" (alist-get 'type param-name-prop)))
+        (should (equal "parameter with hyphen"
+                       (alist-get 'description param-name-prop)))
+        (should param_name-prop)
+        (should (equal "string" (alist-get 'type param_name-prop)))
+        (should (equal "parameter with underscore"
+                       (alist-get 'description param_name-prop)))
+        (should param.name-prop)
+        (should (equal "string" (alist-get 'type param.name-prop)))
+        (should (equal "parameter with dot"
+                       (alist-get 'description param.name-prop)))))))
 
 (ert-deftest mcp-server-lib-test-register-tool-error-duplicate-id ()
   "Test reference counting behavior when registering a tool with duplicate ID.

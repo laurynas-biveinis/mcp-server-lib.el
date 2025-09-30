@@ -109,6 +109,22 @@ of letters, digits, plus, period, or hyphen, ending with ://")
   (concat "\\`" mcp-server-lib--uri-scheme-regex ".+")
   "Regex pattern matching complete URI starting with scheme.")
 
+(defconst mcp-server-lib--param-indent-min 2
+  "Minimum indentation (in spaces) for parameter definitions.
+This follows standard Emacs docstring conventions for list items,
+where list items are typically indented 2-4 spaces.")
+
+(defconst mcp-server-lib--param-indent-max 4
+  "Maximum indentation (in spaces) for parameter definitions.
+This follows standard Emacs docstring conventions for list items,
+where list items are typically indented 2-4 spaces.")
+
+(defconst mcp-server-lib--continuation-indent-min 6
+  "Minimum indentation (in spaces) for continuation lines.
+This value MUST be greater than `mcp-server-lib--param-indent-max'
+to ensure continuation lines can be distinguished from new parameter
+definitions in the parser state machine.")
+
 ;;; Internal global state variables
 
 (defvar mcp-server-lib--running nil
@@ -137,10 +153,39 @@ Keys are URI templates, values are plists with template metadata and handlers.")
   "Return t if PARAM-NAME matches ARG symbol name."
   (string= param-name (symbol-name arg)))
 
+(defun mcp-server-lib--validate-param-for-saving (param-name arglist descriptions)
+  "Validate that PARAM-NAME can be saved to DESCRIPTIONS.
+Check that PARAM-NAME is not already in DESCRIPTIONS and that it
+exists in ARGLIST.  Signal an error if validation fails."
+  (when (assoc param-name descriptions)
+    (error "Duplicate parameter '%s' in MCP Parameters" param-name))
+  (unless (cl-member param-name arglist
+                     :test #'mcp-server-lib--param-name-matches-arg-p)
+    (error "Parameter '%s' in MCP Parameters not in function args %S"
+           param-name arglist)))
+
 (defun mcp-server-lib--extract-param-descriptions (docstring arglist)
   "Extract parameter descriptions from DOCSTRING based on ARGLIST.
-The docstring should contain an \"MCP Parameters:\" section at the end,
-with each parameter described as \"parameter-name - description\".
+
+The docstring should contain an \"MCP Parameters:\" section with parameters
+formatted using indentation-based syntax:
+
+  Parameter definitions (2-4 spaces):
+    param-name - description text
+
+  Continuation lines (6+ spaces):
+      additional description text
+      can span multiple lines
+
+Example:
+  \"Function docstring.
+
+  MCP Parameters:
+    location - city, address, or coordinates
+    verbose - whether to include detailed info
+        Set to t for extended weather data
+        including wind speed and humidity\"
+
 ARGLIST should be the function's argument list.
 Returns an alist mapping parameter names to their descriptions.
 Signals an error if a parameter is described multiple times,
@@ -157,32 +202,52 @@ doesn't match function arguments, or if any parameter is not documented."
            "MCP Parameters:[\n\r]+\\(\\(?:[ \t]+[^ \t\n\r].*[\n\r]*\\)*\\)"
            docstring)
         (let ((params-text (match-string 1 docstring))
+              ;; Match param definitions: spaces (min-max), name, whitespace, hyphen
               (param-regex
-               "[ \t]+\\([^ \t\n\r]+\\)[ \t]*-[ \t]*\\(.*\\)[\n\r]*"))
+               (format "^[ ]\\{%d,%d\\}\\([^ \t\n\r]+\\)[ \t]*-[ \t]*\\(.*\\)$"
+                       mcp-server-lib--param-indent-min
+                       mcp-server-lib--param-indent-max))
+              ;; Match continuation lines: 6+ spaces
+              (continuation-regex
+               (format "^[ ]\\{%d,\\}\\(.*\\)$"
+                       mcp-server-lib--continuation-indent-min))
+              (current-param nil)
+              (current-desc nil))
           (with-temp-buffer
             (insert params-text)
             (goto-char (point-min))
-            (while (re-search-forward param-regex nil t)
-              (let ((param-name (match-string 1))
-                    (param-desc (match-string 2)))
-                ;; Check for duplicate parameter names
-                (when (assoc param-name descriptions)
-                  (error
-                   "Duplicate parameter '%s' in MCP Parameters"
-                   param-name))
-                ;; Check parameter name matches function arguments
-                (unless
-                    (cl-member
-                     param-name
-                     arglist
-                     :test #'mcp-server-lib--param-name-matches-arg-p)
-                  (error
-                   "Parameter '%s' in MCP Parameters not in function args %S"
-                   param-name
-                   arglist))
-                ;; Add to descriptions
-                (push (cons param-name (string-trim param-desc))
-                      descriptions))))))
+            (while (not (eobp))
+              (cond
+               ;; Parameter definition line
+               ((looking-at param-regex)
+                ;; Save previous parameter if exists
+                (when current-param
+                  (mcp-server-lib--validate-param-for-saving
+                   current-param arglist descriptions)
+                  (push (cons current-param (string-trim current-desc))
+                        descriptions))
+                ;; Start new parameter
+                (setq current-param (match-string 1))
+                (setq current-desc (match-string 2))
+                (forward-line))
+               ;; Continuation line
+               ((looking-at continuation-regex)
+                (if current-param
+                    (setq current-desc
+                          (concat current-desc " " (match-string 1)))
+                  (error "Continuation line without parameter at line %d: %S"
+                         (line-number-at-pos)
+                         (string-trim (match-string 0))))
+                (forward-line))
+               ;; Empty or other line
+               (t
+                (forward-line))))
+            ;; Save last parameter
+            (when current-param
+              (mcp-server-lib--validate-param-for-saving
+               current-param arglist descriptions)
+              (push (cons current-param (string-trim current-desc))
+                    descriptions)))))
       ;; Check that all function parameters have descriptions
       (dolist (arg arglist)
         (let ((arg-name (symbol-name arg)))

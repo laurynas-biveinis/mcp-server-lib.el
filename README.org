@@ -106,6 +106,32 @@ MCP Parameters:
   :description "Update task TODO state")
 #+end_src
 
+**** MCP Parameters Format
+
+Parameter descriptions in tool handler docstrings follow an indentation-based format:
+
+- Parameter definitions use 2-4 spaces: ~  param-name - description~
+- Continuation lines use 6+ spaces: ~      additional text~
+- Continuation lines can span multiple lines
+- All function parameters must be documented
+
+Example with multi-line parameter descriptions:
+
+#+begin_src elisp
+(defun fetch-content (url timeout)
+  "Fetch content from a URL.
+
+MCP Parameters:
+  url - web address to fetch
+      Supports http, https, and file protocols
+      Must be a valid URI
+  timeout - seconds to wait before giving up
+      Use 0 for no timeout"
+  (mcp-server-lib-with-error-handling
+    ;; Implementation
+    ))
+#+end_src
+
 Tools can have zero, one, or multiple parameters. When a tool has multiple
 parameters, the JSON object fields from the client are automatically mapped to the
 function parameters by name (converting from camelCase to kebab-case as needed).
