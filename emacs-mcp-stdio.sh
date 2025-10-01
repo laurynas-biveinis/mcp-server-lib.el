@@ -96,6 +96,7 @@ if [ -n "$INIT_FUNCTION" ]; then
 
 	# Execute the command and capture output and return code
 	init_stderr_file="/tmp/mcp-init-stderr.$$-$(date +%s%N)"
+	mcp_debug_log "INIT-STDERR-FILE" "$init_stderr_file"
 	INIT_OUTPUT=$(eval "$INIT_CMD" 2>"$init_stderr_file")
 	INIT_RC=$?
 
