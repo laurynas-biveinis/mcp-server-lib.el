@@ -288,6 +288,17 @@ For testing and debugging:
 
 The =mcp-server-lib-ert= module provides utilities for writing ERT tests for MCP servers:
 
+**** Server Context Variable
+
+Test helper functions use the dynamic variable =mcp-server-lib-ert-server-id= to determine which server to operate on. Child packages testing a single server should set this once at the top of their test file:
+
+#+begin_src elisp
+;; At the top of your test file
+(setq mcp-server-lib-ert-server-id "my-mcp-server")
+#+end_src
+
+**** Test Helper Functions
+
 #+begin_src elisp
 ;; Track metrics changes during test execution
 (mcp-server-lib-ert-with-metrics-tracking

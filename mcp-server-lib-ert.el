@@ -32,6 +32,12 @@
 (require 'mcp-server-lib-metrics)
 (require 'mcp-server-lib-commands)
 
+(defvar mcp-server-lib-ert-server-id "default"
+  "Server ID used by ERT test helper functions.
+Child packages testing a single server should set this once at the top of
+their test file using setq.  Multi-server tests should use let-binding to
+temporarily override this value.")
+
 (defun mcp-server-lib-ert-check-text-response
     (response &optional expected-error)
   "Validate RESPONSE structure and extract text content.

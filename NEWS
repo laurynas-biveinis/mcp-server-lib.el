@@ -62,6 +62,7 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     - mcp-server-lib-ert-with-metrics-tracking
     - mcp-server-lib-ert-assert-initialize-result
     - mcp-server-lib-ert-get-initialize-result
+    - mcp-server-lib-ert-server-id (dynamic variable for test server context)
 
 *** Added resource error signaling API
     - mcp-server-lib-resource-signal-error for signaling custom error codes
