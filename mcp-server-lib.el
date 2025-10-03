@@ -131,18 +131,43 @@ definitions in the parser state machine.")
   "Whether the MCP server is currently running.")
 
 (defvar mcp-server-lib--tools (make-hash-table :test 'equal)
-  "Hash table of registered MCP tools.")
+  "Hash table of registered MCP tools by server.
+Keys are server-id strings, values are hash tables of tool-id to tool-data.")
 
 (defvar mcp-server-lib--resources (make-hash-table :test 'equal)
-  "Hash table of registered MCP resources.
-Keys are URIs, values are plists with resource metadata and handlers.")
+  "Hash table of registered MCP resources by server.
+Keys are server-id strings, values are hash tables of URI to resource-data.")
 
 (defvar mcp-server-lib--resource-templates
   (make-hash-table :test 'equal)
-  "Hash table of registered MCP resource templates.
-Keys are URI templates, values are plists with template metadata and handlers.")
+  "Hash table of registered MCP resource templates by server.
+Keys are server-id strings, values are hash tables of template to template-data.")
 
 ;;; Core helpers
+
+(defun mcp-server-lib--get-server-tools (server-id)
+  "Get tools hash table for SERVER-ID, creating if needed.
+Returns a hash table mapping tool-id to tool-data."
+  (or (gethash server-id mcp-server-lib--tools)
+      (let ((tools-table (make-hash-table :test 'equal)))
+        (puthash server-id tools-table mcp-server-lib--tools)
+        tools-table)))
+
+(defun mcp-server-lib--get-server-resources (server-id)
+  "Get resources hash table for SERVER-ID, creating if needed.
+Returns a hash table mapping URI to resource-data."
+  (or (gethash server-id mcp-server-lib--resources)
+      (let ((resources-table (make-hash-table :test 'equal)))
+        (puthash server-id resources-table mcp-server-lib--resources)
+        resources-table)))
+
+(defun mcp-server-lib--get-server-templates (server-id)
+  "Get templates hash table for SERVER-ID, creating if needed.
+Returns a hash table mapping template to template-data."
+  (or (gethash server-id mcp-server-lib--resource-templates)
+      (let ((templates-table (make-hash-table :test 'equal)))
+        (puthash server-id templates-table mcp-server-lib--resource-templates)
+        templates-table)))
 
 (defun mcp-server-lib--jsonrpc-response (id result)
   "Create a JSON-RPC response with ID and RESULT."
@@ -373,9 +398,10 @@ Example:
   (let ((id (plist-get request-context :id)))
     (mcp-server-lib--jsonrpc-response id result-data)))
 
-(defun mcp-server-lib--log-json-rpc (direction json-message)
-  "Log JSON-RPC message in DIRECTION with JSON-MESSAGE.
-DIRECTION should be \"in\" for incoming, \"out\" for outgoing."
+(defun mcp-server-lib--log-json-rpc (direction json-message server-id)
+  "Log JSON-RPC message in DIRECTION with JSON-MESSAGE for SERVER-ID.
+DIRECTION should be \"in\" for incoming, \"out\" for outgoing.
+SERVER-ID must be non-nil and already resolved to a string."
   (when mcp-server-lib-log-io
     (let ((buffer (get-buffer-create "*mcp-server-lib-log*"))
           (direction-prefix
@@ -391,9 +417,10 @@ DIRECTION should be \"in\" for incoming, \"out\" for outgoing."
         (let ((inhibit-read-only t))
           (view-mode 1)
           (insert
-           (format "%s %s [%s]\n"
+           (format "%s %s [server:%s] [%s]\n"
                    direction-prefix
                    direction-name
+                   server-id
                    json-message)))))))
 
 (defun mcp-server-lib--handle-error (err)
@@ -404,10 +431,11 @@ Returns a JSON-RPC error response string for internal errors."
    mcp-server-lib-jsonrpc-error-internal
    (format "Internal error: %s" (error-message-string err))))
 
-(defun mcp-server-lib--validate-and-dispatch-request (request)
+(defun mcp-server-lib--validate-and-dispatch-request (request server-id)
   "Process a JSON-RPC REQUEST object and validate JSON-RPC 2.0 compliance.
 
 REQUEST is a parsed JSON object (alist) containing the JSON-RPC request fields.
+SERVER-ID is required and identifies which server registry to use.
 
 The function performs JSON-RPC 2.0 validation, checking:
 - Protocol version (must be \"2.0\")
@@ -452,7 +480,7 @@ Returns a JSON-RPC formatted response string, or nil for notifications."
 
      ;; Process valid request
      (t
-      (mcp-server-lib--dispatch-jsonrpc-method id method params)))))
+      (mcp-server-lib--dispatch-jsonrpc-method id method params server-id)))))
 
 ;;; Resource Template Support
 
@@ -542,25 +570,27 @@ Returns:
             (nreverse params)
           'match-no-params)))))
 
-(defun mcp-server-lib--find-matching-template (uri)
-  "Find a resource template that matches URI.
+(defun mcp-server-lib--find-matching-template (uri templates-table)
+  "Find a resource template that matches URI in TEMPLATES-TABLE.
+TEMPLATES-TABLE is required and can be nil.
 Returns cons of (template . params) or nil if no match found."
-  (catch 'found
-    (maphash
-     (lambda (_template-pattern template-data)
-       (let* ((parsed (plist-get template-data :parsed))
-              (match-result
-               (mcp-server-lib--match-uri-template uri parsed)))
-         ;; match-result is nil for no match, 'match-no-params or alist
-         (when match-result
-           (throw 'found
-                  (cons
-                   template-data
-                   (if (eq match-result 'match-no-params)
-                       nil
-                     match-result))))))
-     mcp-server-lib--resource-templates)
-    nil))
+  (when templates-table
+    (catch 'found
+      (maphash
+       (lambda (_template-pattern template-data)
+         (let* ((parsed (plist-get template-data :parsed))
+                (match-result
+                 (mcp-server-lib--match-uri-template uri parsed)))
+           ;; match-result is nil for no match, 'match-no-params or alist
+           (when match-result
+             (throw 'found
+                    (cons
+                     template-data
+                     (if (eq match-result 'match-no-params)
+                         nil
+                       match-result))))))
+       templates-table)
+      nil)))
 
 (defun mcp-server-lib--execute-resource-handler
     (resource-data uri handler-params id method-metrics)
@@ -598,16 +628,16 @@ METHOD-METRICS is used to track errors."
               uri (error-message-string err))))))
 
 (defun mcp-server-lib--handle-resources-read
-    (id params method-metrics)
-  "Handle resources/read request with ID and PARAMS.
+    (id params method-metrics server-id)
+  "Handle resources/read request with ID and PARAMS for SERVER-ID.
 METHOD-METRICS is used to track errors for this method."
-  (let*
-      ((uri (alist-get 'uri params))
-       (resource (gethash uri mcp-server-lib--resources))
-       ;; Try to find matching resource template if no direct resource
-       (template-match
-        (unless resource
-          (mcp-server-lib--find-matching-template uri))))
+  (let* ((uri (alist-get 'uri params))
+         (resources-table (mcp-server-lib--get-server-resources server-id))
+         (templates-table (mcp-server-lib--get-server-templates server-id))
+         (resource (gethash uri resources-table))
+         (template-match
+          (unless resource
+            (mcp-server-lib--find-matching-template uri templates-table))))
     (cond
      ;; Direct resource found
      (resource
@@ -626,8 +656,8 @@ METHOD-METRICS is used to track errors for this method."
        mcp-server-lib-jsonrpc-error-invalid-params
        (format "Resource not found: %s" uri))))))
 
-(defun mcp-server-lib--dispatch-jsonrpc-method (id method params)
-  "Dispatch a JSON-RPC request to the appropriate handler.
+(defun mcp-server-lib--dispatch-jsonrpc-method (id method params server-id)
+  "Dispatch a JSON-RPC request to the appropriate handler for SERVER-ID.
 ID is the JSON-RPC request ID to use in response.
 METHOD is the JSON-RPC method name to dispatch.
 PARAMS is the JSON-RPC params object from the request.
@@ -637,23 +667,23 @@ Returns a JSON-RPC response string for the request."
 
     (cond
      ((equal method "initialize")
-      (mcp-server-lib--handle-initialize id))
+      (mcp-server-lib--handle-initialize id server-id))
      ((equal method "notifications/initialized")
       (mcp-server-lib--handle-initialized)
       nil)
      ((equal method "notifications/cancelled")
       nil)
      ((equal method "tools/list")
-      (mcp-server-lib--handle-tools-list id))
+      (mcp-server-lib--handle-tools-list id server-id))
      ((equal method "resources/list")
-      (mcp-server-lib--handle-resources-list id))
+      (mcp-server-lib--handle-resources-list id server-id))
      ((equal method "resources/templates/list")
-      (mcp-server-lib--handle-resources-templates-list id))
+      (mcp-server-lib--handle-resources-templates-list id server-id))
      ((equal method "resources/read")
       (mcp-server-lib--handle-resources-read
-       id params method-metrics))
+       id params method-metrics server-id))
      ((equal method "tools/call")
-      (mcp-server-lib--handle-tools-call id params method-metrics))
+      (mcp-server-lib--handle-tools-call id params method-metrics server-id))
      (t
       (mcp-server-lib--jsonrpc-error
        id
@@ -662,32 +692,27 @@ Returns a JSON-RPC response string for the request."
 
 ;;; Notification handlers
 
-(defun mcp-server-lib--handle-initialize (id)
-  "Handle initialize request with ID.
-
+(defun mcp-server-lib--handle-initialize (id server-id)
+  "Handle initialize request with ID for SERVER-ID.
 This implements the MCP initialize handshake, which negotiates protocol
 version and capabilities between the client and server."
   (let ((capabilities '()))
-    ;; Only include tools capability if tools are registered
-    (when (and mcp-server-lib--tools
-               (> (hash-table-count mcp-server-lib--tools) 0))
-      (push `(tools . ,(make-hash-table)) capabilities))
-    ;; Include resources capability if resources are registered
-    (when (or (and mcp-server-lib--resources
-                   (> (hash-table-count mcp-server-lib--resources) 0))
-              (and mcp-server-lib--resource-templates
-                   (> (hash-table-count
-                       mcp-server-lib--resource-templates)
-                      0)))
-      (push `(resources . ,(make-hash-table)) capabilities))
-    (mcp-server-lib--jsonrpc-response
-     id
-     `((protocolVersion . ,mcp-server-lib-protocol-version)
-       (serverInfo
-        .
-        ((name . ,mcp-server-lib-name)
-         (version . ,mcp-server-lib-protocol-version)))
-       (capabilities . ,capabilities)))))
+    (let ((tools-table (gethash server-id mcp-server-lib--tools))
+          (resources-table (gethash server-id mcp-server-lib--resources))
+          (templates-table (gethash server-id mcp-server-lib--resource-templates)))
+      (when (and tools-table (> (hash-table-count tools-table) 0))
+        (push `(tools . ,(make-hash-table)) capabilities))
+      (when (or (and resources-table (> (hash-table-count resources-table) 0))
+                (and templates-table (> (hash-table-count templates-table) 0)))
+        (push `(resources . ,(make-hash-table)) capabilities))
+      (mcp-server-lib--jsonrpc-response
+       id
+       `((protocolVersion . ,mcp-server-lib-protocol-version)
+         (serverInfo
+          .
+          ((name . ,mcp-server-lib-name)
+           (version . ,mcp-server-lib-protocol-version)))
+         (capabilities . ,capabilities))))))
 
 (defun mcp-server-lib--handle-initialized ()
   "Handle initialized notification from client.
@@ -696,40 +721,40 @@ This is called after successful initialization to complete the handshake.
 The client sends this notification to acknowledge the server's response
 to the initialize request.")
 
-(defun mcp-server-lib--handle-tools-list (id)
-  "Handle tools/list request with ID.
-
+(defun mcp-server-lib--handle-tools-list (id server-id)
+  "Handle tools/list request with ID for SERVER-ID.
 Returns a list of all registered tools with their metadata."
   (let ((tool-list (vector)))
-    (maphash
-     (lambda (tool-id tool)
-       (let* ((tool-description (plist-get tool :description))
-              (tool-title (plist-get tool :title))
-              (tool-read-only (plist-get tool :read-only))
-              (tool-schema
-               (or (plist-get tool :schema) '((type . "object"))))
-              (tool-entry
-               `((name . ,tool-id)
-                 (description . ,tool-description)
-                 (inputSchema . ,tool-schema)))
-              (annotations nil))
-         ;; Collect annotations if present
-         (when tool-title
-           (push (cons 'title tool-title) annotations))
-         ;; Add readOnlyHint when :read-only is explicitly provided (both t
-         ;; and nil)
-         (when (plist-member tool :read-only)
-           (let ((annot-value
-                  (if tool-read-only
-                      t
-                    :json-false)))
-             (push (cons 'readOnlyHint annot-value) annotations)))
-         ;; Add annotations to tool entry if any exist
-         (when annotations
-           (setq tool-entry
-                 (append tool-entry `((annotations . ,annotations)))))
-         (setq tool-list (vconcat tool-list (vector tool-entry)))))
-     mcp-server-lib--tools)
+    (when-let* ((tools-table (gethash server-id mcp-server-lib--tools)))
+      (maphash
+       (lambda (tool-id tool)
+         (let* ((tool-description (plist-get tool :description))
+                (tool-title (plist-get tool :title))
+                (tool-read-only (plist-get tool :read-only))
+                (tool-schema
+                 (or (plist-get tool :schema) '((type . "object"))))
+                (tool-entry
+                 `((name . ,tool-id)
+                   (description . ,tool-description)
+                   (inputSchema . ,tool-schema)))
+                (annotations nil))
+           ;; Collect annotations if present
+           (when tool-title
+             (push (cons 'title tool-title) annotations))
+           ;; Add readOnlyHint when :read-only is explicitly provided (both t
+           ;; and nil)
+           (when (plist-member tool :read-only)
+             (let ((annot-value
+                    (if tool-read-only
+                        t
+                      :json-false)))
+               (push (cons 'readOnlyHint annot-value) annotations)))
+           ;; Add annotations to tool entry if any exist
+           (when annotations
+             (setq tool-entry
+                   (append tool-entry `((annotations . ,annotations)))))
+           (setq tool-list (vconcat tool-list (vector tool-entry)))))
+       tools-table))
     (mcp-server-lib--jsonrpc-response id `((tools . ,tool-list)))))
 
 (defun mcp-server-lib--build-resource-entry
@@ -770,31 +795,36 @@ Returns a vector of resource entries."
      hash-table)
     entries))
 
-(defun mcp-server-lib--handle-resources-list (id)
-  "Handle resources/list request with ID.
-
+(defun mcp-server-lib--handle-resources-list (id server-id)
+  "Handle resources/list request with ID for SERVER-ID.
 Returns a list of all registered resources with their metadata."
-  (let ((resource-list
-         (mcp-server-lib--collect-resources-from-hash
-          mcp-server-lib--resources nil)))
+  (let* ((resources-table (gethash server-id mcp-server-lib--resources))
+         (resource-list
+          (if resources-table
+              (mcp-server-lib--collect-resources-from-hash
+               resources-table nil)
+            (vector))))
     (mcp-server-lib--jsonrpc-response
      id `((resources . ,resource-list)))))
 
-(defun mcp-server-lib--handle-resources-templates-list (id)
-  "Handle resources/templates/list request with ID.
-
+(defun mcp-server-lib--handle-resources-templates-list (id server-id)
+  "Handle resources/templates/list request with ID for SERVER-ID.
 Returns a list of all registered resource templates."
-  (let ((template-list
-         (mcp-server-lib--collect-resources-from-hash
-          mcp-server-lib--resource-templates t)))
+  (let* ((templates-table (gethash server-id mcp-server-lib--resource-templates))
+         (template-list
+          (if templates-table
+              (mcp-server-lib--collect-resources-from-hash
+               templates-table t)
+            (vector))))
     (mcp-server-lib--jsonrpc-response
      id `((resourceTemplates . ,template-list)))))
 
-(defun mcp-server-lib--handle-tools-call (id params method-metrics)
-  "Handle tools/call request with ID and PARAMS.
+(defun mcp-server-lib--handle-tools-call (id params method-metrics server-id)
+  "Handle tools/call request with ID and PARAMS for SERVER-ID.
 METHOD-METRICS is used to track errors for this method."
   (let* ((tool-name (alist-get 'name params))
-         (tool (gethash tool-name mcp-server-lib--tools))
+         (tools-table (gethash server-id mcp-server-lib--tools))
+         (tool (when tools-table (gethash tool-name tools-table)))
          (tool-args (alist-get 'arguments params)))
     (if tool
         (let ((handler (plist-get tool :handler))
@@ -940,27 +970,23 @@ See also: `mcp-server-lib-tool-throw'"
 
 ;;; API - Transport
 
-(defun mcp-server-lib-process-jsonrpc (json-string)
-  "Process a JSON-RPC message JSON-STRING and return the response.
+(defun mcp-server-lib-process-jsonrpc (json-string server-id)
+  "Process a JSON-RPC message JSON-STRING for SERVER-ID and return the response.
 This is the main entry point for stdio transport in MCP.
 
 The function accepts a JSON-RPC 2.0 message string and returns
 a JSON-RPC response string suitable for returning to clients via stdout.
 
 When using the MCP server with emacsclient, invoke this function like:
-emacsclient -e \\='(mcp-server-lib-process-jsonrpc \"[JSON-RPC message]\")\\='
-
-Example:
-  (mcp-server-lib-process-jsonrpc
-   \"{\\\"jsonrpc\\\":\\\"2.0\\\",
-     \\\"method\\\":\\\"mcp.server.describe\\\",\\\"id\\\":1}\")
+emacsclient -e \\='(mcp-server-lib-process-jsonrpc
+                  \"[JSON-RPC message]\" \"my-server\")\\='
 
 See also: `mcp-server-lib-process-jsonrpc-parsed'"
   (unless mcp-server-lib--running
     (error
      "No active MCP server, start server with `mcp-server-lib-start' first"))
 
-  (mcp-server-lib--log-json-rpc "in" json-string)
+  (mcp-server-lib--log-json-rpc "in" json-string server-id)
 
   ;; Step 1: Try to parse the JSON, handle parsing errors
   (let ((json-object nil)
@@ -980,31 +1006,22 @@ See also: `mcp-server-lib-process-jsonrpc-parsed'"
       (condition-case err
           (setq response
                 (mcp-server-lib--validate-and-dispatch-request
-                 json-object))
+                 json-object server-id))
         (error
          (setq response (mcp-server-lib--handle-error err)))))
 
     ;; Only log and return responses when they exist (not for notifications)
     (when response
-      (mcp-server-lib--log-json-rpc "out" response))
+      (mcp-server-lib--log-json-rpc "out" response server-id))
     response))
 
-(defun mcp-server-lib-process-jsonrpc-parsed (request)
-  "Send REQUEST to the MCP server and return parsed response.
+(defun mcp-server-lib-process-jsonrpc-parsed (request server-id)
+  "Send REQUEST to the MCP server and return parsed response for SERVER-ID.
 REQUEST should be a JSON string containing a valid JSON-RPC 2.0 request.
 
-Call `mcp-server-lib-process-jsonrpc' and return its result as a parsed alist.
-
-Example:
-  (let* ((request (mcp-server-lib-create-tools-list-request))
-         (response (mcp-server-lib-process-jsonrpc-parsed request))
-         (tools (alist-get \\='tools (alist-get \\='result response))))
-    ;; tools is now an array of tool definitions
-    (seq-doseq (tool tools)
-      (message \"Tool: %s\" (alist-get \\='name tool))))
-
-See also: `mcp-server-lib-process-jsonrpc'"
-  (json-read-from-string (mcp-server-lib-process-jsonrpc request)))
+Call `mcp-server-lib-process-jsonrpc' and return its result as a parsed alist."
+  (json-read-from-string
+   (mcp-server-lib-process-jsonrpc request server-id)))
 
 ;;; API - Utilities
 
@@ -1082,6 +1099,7 @@ Required properties:
 Optional properties:
   :title           User-friendly display name for the tool
   :read-only       If true, indicates tool doesn't modify its environment
+  :server-id       Server identifier (defaults to \"default\")
 
 The HANDLER function's signature determines its input schema.
 Currently only no-argument and single-argument handlers are supported.
@@ -1120,7 +1138,9 @@ See also:
   (let* ((id (plist-get properties :id))
          (description (plist-get properties :description))
          (title (plist-get properties :title))
-         (read-only (plist-get properties :read-only)))
+         (read-only (plist-get properties :read-only))
+         (server-id (or (plist-get properties :server-id) "default"))
+         (tools-table (mcp-server-lib--get-server-tools server-id)))
     ;; Error checking for required properties
     (unless (functionp handler)
       (error "Tool registration requires handler function"))
@@ -1129,9 +1149,9 @@ See also:
     (unless description
       (error "Tool registration requires :description property"))
     ;; Check for existing registration
-    (if-let* ((existing (gethash id mcp-server-lib--tools)))
+    (if-let* ((existing (gethash id tools-table)))
       (mcp-server-lib--ref-counted-register
-       id existing mcp-server-lib--tools)
+       id existing tools-table)
       (let* ((schema
               (mcp-server-lib--generate-schema-from-function handler))
              (tool
@@ -1148,22 +1168,18 @@ See also:
           (setq tool (plist-put tool :read-only read-only)))
         ;; Register the tool
         (mcp-server-lib--ref-counted-register
-         id tool mcp-server-lib--tools)))))
+         id tool tools-table)))))
 
-(defun mcp-server-lib-unregister-tool (tool-id)
-  "Unregister a tool with ID TOOL-ID from the MCP server.
-
-Arguments:
-  TOOL-ID  String identifier for the tool to unregister
+(defun mcp-server-lib-unregister-tool (tool-id &optional server-id)
+  "Unregister a tool with ID TOOL-ID from the MCP server with SERVER-ID.
 
 Returns t if the tool was found and removed, nil otherwise.
 
-Example:
-  (mcp-server-lib-unregister-tool \"org-list-files\")
-
 See also: `mcp-server-lib-register-tool'"
-  (mcp-server-lib--ref-counted-unregister
-   tool-id mcp-server-lib--tools))
+  (let ((tools-table (mcp-server-lib--get-server-tools
+                      (or server-id "default"))))
+    (mcp-server-lib--ref-counted-unregister
+     tool-id tools-table)))
 
 ;; Custom error type for tool errors
 (define-error 'mcp-server-lib-tool-error "MCP tool error" 'user-error)
@@ -1316,6 +1332,7 @@ Required properties:
 Optional properties:
   :description     Description of the resource
   :mime-type       MIME type (default: \"text/plain\")
+  :server-id       Server identifier (defaults to \"default\")
 
 Examples:
   ;; Static resource
@@ -1339,33 +1356,37 @@ Examples:
    :description \"Hierarchical outline of an Org file\")
 
 See also: `mcp-server-lib-unregister-resource'"
-  ;; Check for proper URI structure: scheme://path
-  (unless (string-match-p mcp-server-lib--uri-with-scheme-regex uri)
-    (error "Resource URI must have format 'scheme://path': '%s'" uri))
-  ;; Check for unmatched }
-  (when (and (string-match-p "}" uri) (not (string-match-p "{" uri)))
-    (error "Unmatched '}' in resource URI: %s" uri))
-  ;; Check if this is a template by looking for unescaped {
-  (if (string-match-p "{" uri)
-      ;; It's a template - delegate to template logic
-      (let ((parsed (mcp-server-lib--parse-uri-template uri)))
-        (mcp-server-lib--register-resource-internal
-         uri
-         handler
-         properties
-         mcp-server-lib--resource-templates
-         (list :parsed parsed)))
-    ;; It's a static resource
-    (mcp-server-lib--register-resource-internal
-     uri handler properties mcp-server-lib--resources nil)))
+  (let* ((server-id (or (plist-get properties :server-id) "default"))
+         (resources-table (mcp-server-lib--get-server-resources server-id))
+         (templates-table (mcp-server-lib--get-server-templates server-id)))
+    ;; Check for proper URI structure: scheme://path
+    (unless (string-match-p mcp-server-lib--uri-with-scheme-regex uri)
+      (error "Resource URI must have format 'scheme://path': '%s'" uri))
+    ;; Check for unmatched }
+    (when (and (string-match-p "}" uri) (not (string-match-p "{" uri)))
+      (error "Unmatched '}' in resource URI: %s" uri))
+    ;; Check if this is a template by looking for unescaped {
+    (if (string-match-p "{" uri)
+        ;; It's a template - delegate to template logic
+        (let ((parsed (mcp-server-lib--parse-uri-template uri)))
+          (mcp-server-lib--register-resource-internal
+           uri
+           handler
+           properties
+           templates-table
+           (list :parsed parsed)))
+      ;; It's a static resource
+      (mcp-server-lib--register-resource-internal
+       uri handler properties resources-table nil))))
 
-(defun mcp-server-lib-unregister-resource (uri)
+(defun mcp-server-lib-unregister-resource (uri &optional server-id)
   "Unregister a resource by its URI.
 
 Automatically detects whether URI is a template based on presence of {}.
 
 Arguments:
-    URI  The URI or URI template to unregister
+  URI       The URI or URI template to unregister
+  SERVER-ID Server identifier (optional, defaults to \"default\")
 
 Returns t if the resource was found and removed, nil otherwise.
 
@@ -1374,14 +1395,17 @@ Examples:
   (mcp-server-lib-unregister-resource \"org://{filename}/outline\")
 
 See also: `mcp-server-lib-register-resource'"
-  ;; Check if this is a template by looking for unescaped {
-  (if (string-match-p "{" uri)
-      ;; It's a template
+  (let* ((server-id (or server-id "default"))
+         (resources-table (mcp-server-lib--get-server-resources server-id))
+         (templates-table (mcp-server-lib--get-server-templates server-id)))
+    ;; Check if this is a template by looking for unescaped {
+    (if (string-match-p "{" uri)
+        ;; It's a template
+        (mcp-server-lib--ref-counted-unregister
+         uri templates-table)
+      ;; It's a static resource
       (mcp-server-lib--ref-counted-unregister
-       uri mcp-server-lib--resource-templates)
-    ;; It's a static resource
-    (mcp-server-lib--ref-counted-unregister
-     uri mcp-server-lib--resources)))
+       uri resources-table))))
 
 (defun mcp-server-lib-resource-signal-error (code message)
   "Signal a JSON-RPC error from a resource handler.

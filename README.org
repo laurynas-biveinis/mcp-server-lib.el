@@ -12,6 +12,7 @@
 * Features
 
 - Simple API for registering tools (Elisp functions) and resources
+- Multi-server support
 - Resource templates with URI pattern matching (RFC 6570 subset)
 - Handles MCP protocol communication and JSON-RPC messages
 - Stdio transport via emacsclient wrapper script
@@ -64,6 +65,8 @@ Script options:
 - =--init-function=NAME= - Emacs function to call on startup
 - =--stop-function=NAME= - Emacs function to call on shutdown
 - =--socket=PATH= - Custom Emacs server socket (optional)
+- =--server-id=ID= - Explicit server identifier (optional, will become mandatory in
+  the future)
 
 For debugging, set =EMACS_MCP_DEBUG_LOG= to a file path.
 
@@ -76,7 +79,8 @@ For debugging, set =EMACS_MCP_DEBUG_LOG= to a file path.
   :id "tool-name"
   :description "What this tool does"
   :title "Display Name"        ; optional
-  :read-only t)                ; optional
+  :read-only t                 ; optional
+  :server-id "my-server")      ; optional
 
 ;; Tool handler with one parameter
 (defun my-handler (location)
@@ -103,7 +107,8 @@ MCP Parameters:
 
 (mcp-server-lib-register-tool #'update-todo-state
   :id "update-todo"
-  :description "Update task TODO state")
+  :description "Update task TODO state"
+  :server-id "my-server")  ; optional
 #+end_src
 
 **** MCP Parameters Format
@@ -146,6 +151,7 @@ wrapped with =mcp-server-lib-with-error-handling=.
 Optional properties:
 - =:title= - User-friendly display name
 - =:read-only= - Set to =t= if tool doesn't modify state
+- =:server-id= - Server identifier (optional, defaults to ="default"=)
 
 *** Registering Resources
 
@@ -157,12 +163,14 @@ The library uses a unified API for both static and templated resources. The pres
   (lambda () "resource content")
   :name "Resource Name"
   :description "What this provides"    ; optional
-  :mime-type "text/plain")             ; optional
+  :mime-type "text/plain"              ; optional
+  :server-id "my-server")              ; optional
 
 ;; Dynamic resource example
 (mcp-server-lib-register-resource "buffer://current"
   (lambda () (buffer-string))
-  :name "Current Buffer")
+  :name "Current Buffer"
+  :server-id "my-server")  ; optional
 
 ;; Template resource with simple variable
 (mcp-server-lib-register-resource "org://{filename}"
@@ -171,7 +179,8 @@ The library uses a unified API for both static and templated resources. The pres
       (insert-file-contents (alist-get "filename" params nil nil #'string=))
       (buffer-string)))
   :name "Org file content"
-  :description "Read any org file by name")
+  :description "Read any org file by name"
+  :server-id "my-server")  ; optional
 
 ;; Template with multiple variables
 (mcp-server-lib-register-resource "org://{filename}/headline/{+path}"
@@ -181,7 +190,8 @@ The library uses a unified API for both static and templated resources. The pres
       ;; path can contain slashes with {+path}
       (org-get-headline-content file path)))
   :name "Org headline"
-  :description "Get specific headline from org file")
+  :description "Get specific headline from org file"
+  :server-id "my-server")  ; optional
 #+end_src
 
 Static resource handlers take no arguments and return strings. Template resource handlers receive an alist of parameters extracted from the URI.
@@ -235,7 +245,8 @@ Resource template handlers receive extracted parameters as an alist. These param
       (with-temp-buffer
         (insert-file-contents (url-unhex-string path))
         (buffer-string))))
-  :name "File reader")
+  :name "File reader"
+  :server-id "my-server")  ; optional
 #+end_src
 
 Variable names in templates follow simple rules - stick to letters, numbers, and underscores. The URI scheme (like =file://= or =org://=) needs to be a valid URI scheme starting with a letter. URI schemes are case-insensitive per RFC 3986, so =HTTP://example.com= will match a template registered as =http://{domain}=.
@@ -251,8 +262,8 @@ The implementation uses non-greedy (first-match) behavior when matching variable
 To unregister any resource (static or templated):
 
 #+begin_src elisp
-(mcp-server-lib-unregister-resource "org://{filename}")
-(mcp-server-lib-unregister-resource "resource://uri")
+(mcp-server-lib-unregister-resource "org://{filename}" :server-id "my-server")
+(mcp-server-lib-unregister-resource "resource://uri" :server-id "my-server")
 #+end_src
 
 *** Resource Lists

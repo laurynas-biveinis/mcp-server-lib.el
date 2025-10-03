@@ -33,6 +33,9 @@
 (require 'mcp-server-lib-ert)
 (require 'json)
 
+;; Set the server ID for all tests in this file
+(setq mcp-server-lib-ert-server-id "default")
+
 ;;; Test data
 
 (defconst mcp-server-lib-test--string-list-result "item1 item2 item3"
@@ -394,13 +397,14 @@ Arguments:
       (push (pop body) props)
       (push (pop body) props))
     (setq props (nreverse props))
-    ;; Extract tool ID for unregistration
-    (let ((tool-id (plist-get props :id)))
+    ;; Extract tool ID and server ID for unregistration
+    (let ((tool-id (plist-get props :id))
+          (server-id (plist-get props :server-id)))
       `(unwind-protect
            (progn
              (mcp-server-lib-register-tool ,handler ,@props)
              ,@body)
-         (mcp-server-lib-unregister-tool ,tool-id)))))
+         (mcp-server-lib-unregister-tool ,tool-id ,server-id)))))
 
 (defmacro mcp-server-lib-test--with-tools (tools &rest body)
   "Run BODY with MCP server active and TOOLS registered.
@@ -455,11 +459,13 @@ Arguments:
       (push (pop body) props)
       (push (pop body) props))
     (setq props (nreverse props))
-    `(unwind-protect
-         (progn
-           (mcp-server-lib-register-resource ,uri ,handler ,@props)
-           ,@body)
-       (mcp-server-lib-unregister-resource ,uri))))
+    ;; Extract server ID for unregistration
+    (let ((server-id (plist-get props :server-id)))
+      `(unwind-protect
+           (progn
+             (mcp-server-lib-register-resource ,uri ,handler ,@props)
+             ,@body)
+         (mcp-server-lib-unregister-resource ,uri ,server-id)))))
 
 (defun mcp-server-lib-test--find-resource-by-uri (uri resources)
   "Find a resource in RESOURCES array by its URI field."
@@ -560,7 +566,9 @@ Arguments:
 (defun mcp-server-lib-test--check-jsonrpc-error
     (request expected-code expected-message)
   "Test that JSON-RPC REQUEST is rejected with EXPECTED-CODE and EXPECTED-MESSAGE."
-  (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed request)))
+  (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed
+                   request
+                   mcp-server-lib-ert-server-id)))
     (mcp-server-lib-ert-check-error-object resp-obj expected-code expected-message)))
 
 (defun mcp-server-lib-test--check-invalid-jsonrpc-version (version)
@@ -641,6 +649,16 @@ EXPECTED-FIELDS is an alist of (field . value) pairs to verify."
       (should (= (length expected-fields) (length resource)))
       (dolist (field expected-fields)
         (should (equal (alist-get (car field) resource) (cdr field)))))))
+
+(defun mcp-server-lib-test--check-single-template (expected-fields)
+  "Check the template list to contain exactly one template with EXPECTED-FIELDS.
+EXPECTED-FIELDS is an alist of (field . value) pairs to verify."
+  (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
+    (should (= 1 (length templates)))
+    (let ((template (aref templates 0)))
+      (should (= (length expected-fields) (length template)))
+      (dolist (field expected-fields)
+        (should (equal (alist-get (car field) template) (cdr field)))))))
 
 (defmacro mcp-server-lib-test--check-resource-read-error
     (uri expected-code expected-message)
@@ -1266,6 +1284,21 @@ from a function loaded from bytecode rather than interpreted elisp."
   "Test `mcp-server-lib-unregister-tool' when no tools are registered."
   (should-not (mcp-server-lib-unregister-tool "any-tool")))
 
+(ert-deftest mcp-server-lib-test-unregister-tool-nonexistent-server ()
+  "Test that unregistering from non-existent server-id returns nil."
+  (mcp-server-lib-ert-with-server
+   :tools nil :resources nil
+   (mcp-server-lib-test--register-tool
+    #'mcp-server-lib-test--return-string
+    :id "test-tool"
+    :description "Test tool"
+    :server-id "server-a"
+    ;; Try to unregister from a different server - should return nil
+    (should-not (mcp-server-lib-unregister-tool "test-tool" "server-b"))
+    ;; Verify tool is still registered in server-a
+    (let ((mcp-server-lib-ert-server-id "server-a"))
+      (should (= 1 (length (mcp-server-lib-test--get-tool-list))))))))
+
 ;;; Notification tests
 
 (ert-deftest mcp-server-lib-test-notifications-cancelled ()
@@ -1276,7 +1309,9 @@ from a function loaded from bytecode rather than interpreted elisp."
              `(("jsonrpc" . "2.0")
                ("method" . "notifications/cancelled"))))
            (response
-            (mcp-server-lib-process-jsonrpc notifications-cancelled)))
+            (mcp-server-lib-process-jsonrpc
+             notifications-cancelled
+             mcp-server-lib-ert-server-id)))
       ;; Notifications are one-way, should return nil
       (should-not response))))
 
@@ -1471,7 +1506,9 @@ from a function loaded from bytecode rather than interpreted elisp."
     ;; Call with only one parameter when two are required
     (let* ((args '((first-name . "John")))  ; Missing last-name
            (request (mcp-server-lib-create-tools-call-request "two-params" 42 args))
-           (response (mcp-server-lib-process-jsonrpc-parsed request))
+           (response (mcp-server-lib-process-jsonrpc-parsed
+                      request
+                      mcp-server-lib-ert-server-id))
            (error-obj (alist-get 'error response)))
       (should error-obj)
       (should (equal mcp-server-lib-jsonrpc-error-invalid-params
@@ -1490,7 +1527,9 @@ from a function loaded from bytecode rather than interpreted elisp."
                    (last-name . "Doe")
                    (middle-name . "Extra")))  ; Extra parameter
            (request (mcp-server-lib-create-tools-call-request "two-params" 42 args))
-           (response (mcp-server-lib-process-jsonrpc-parsed request))
+           (response (mcp-server-lib-process-jsonrpc-parsed
+                      request
+                      mcp-server-lib-ert-server-id))
            (error-obj (alist-get 'error response)))
       (should error-obj)
       (should (equal mcp-server-lib-jsonrpc-error-invalid-params
@@ -1613,7 +1652,9 @@ from a function loaded from bytecode rather than interpreted elisp."
         :description "A tool that always fails"))
     (mcp-server-lib-test--check-tool-call-error "failing-tool"
       (let* ((resp-obj
-              (mcp-server-lib-process-jsonrpc-parsed request))
+              (mcp-server-lib-process-jsonrpc-parsed
+               request
+               mcp-server-lib-ert-server-id))
              (text
               (mcp-server-lib-ert-check-text-response resp-obj t)))
         (should (string= "This tool intentionally fails" text))))))
@@ -1836,7 +1877,9 @@ from a function loaded from bytecode rather than interpreted elisp."
   "Test that `mcp-server-lib-process-jsonrpc-parsed' returns parsed response."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
     (let* ((request (mcp-server-lib-create-tools-list-request))
-           (response (mcp-server-lib-process-jsonrpc-parsed request)))
+           (response (mcp-server-lib-process-jsonrpc-parsed
+                      request
+                      mcp-server-lib-ert-server-id)))
       ;; Response should be a parsed alist, not a string
       (should (listp response))
       (should (alist-get 'result response))
@@ -1851,7 +1894,9 @@ from a function loaded from bytecode rather than interpreted elisp."
 
   (mcp-server-lib-ert-with-server :tools nil :resources nil
     (let* ((request (mcp-server-lib-create-tools-list-request))
-           (response (mcp-server-lib-process-jsonrpc request)))
+           (response (mcp-server-lib-process-jsonrpc
+                      request
+                      mcp-server-lib-ert-server-id)))
 
       (let ((log-buffer (get-buffer "*mcp-server-lib-log*")))
         (should log-buffer)
@@ -1860,10 +1905,10 @@ from a function loaded from bytecode rather than interpreted elisp."
           (let ((content (buffer-string))
                 (expected-suffix
                  (concat
-                  "-> (request) ["
+                  "-> (request) [server:" mcp-server-lib-ert-server-id "] ["
                   request
                   "]\n"
-                  "<- (response) ["
+                  "<- (response) [server:" mcp-server-lib-ert-server-id "] ["
                   response
                   "]\n")))
             (should (string-suffix-p expected-suffix content)))))))
@@ -1876,7 +1921,7 @@ from a function loaded from bytecode rather than interpreted elisp."
 
   (mcp-server-lib-ert-with-server :tools nil :resources nil
     (let ((request (mcp-server-lib-create-tools-list-request)))
-      (mcp-server-lib-process-jsonrpc request)
+      (mcp-server-lib-process-jsonrpc request mcp-server-lib-ert-server-id)
       (should-not (get-buffer "*mcp-server-lib-log*")))))
 
 ;;; Misc tests
@@ -2087,7 +2132,8 @@ from a function loaded from bytecode rather than interpreted elisp."
         :description "Tool for testing metrics"))
     ;; Make some operations to generate metrics
     (mcp-server-lib-process-jsonrpc
-     (mcp-server-lib-create-tools-list-request 100))
+     (mcp-server-lib-create-tools-list-request 100)
+     mcp-server-lib-ert-server-id)
     (mcp-server-lib-test--call-tool "metrics-test-tool" 101)
     (mcp-server-lib-test--call-tool "metrics-test-tool" 102)
 
@@ -2113,7 +2159,8 @@ from a function loaded from bytecode rather than interpreted elisp."
      :description "Tool for testing display"))
    ;; Generate some metrics
    (mcp-server-lib-process-jsonrpc
-    (mcp-server-lib-create-tools-list-request 200))
+    (mcp-server-lib-create-tools-list-request 200)
+    mcp-server-lib-ert-server-id)
    (mcp-server-lib-test--call-tool "display-test-tool" 201)
 
    ;; Show metrics
@@ -2144,7 +2191,8 @@ from a function loaded from bytecode rather than interpreted elisp."
   ;; First part: generate metrics and verify they exist
   (mcp-server-lib-ert-with-server :tools nil :resources nil
                                     (mcp-server-lib-process-jsonrpc
-                                     (mcp-server-lib-create-tools-list-request 100))
+                                     (mcp-server-lib-create-tools-list-request 100)
+                                     mcp-server-lib-ert-server-id)
                                     
                                     ;; Verify metrics exist
                                     (let ((summary (mcp-server-lib-metrics-summary)))
@@ -2968,6 +3016,129 @@ from a function loaded from bytecode rather than interpreted elisp."
     (if (version< emacs-version "30.1")
         "Error reading resource test://123: Wrong number of arguments: ((t) nil \"Generic handler to return a test string.\" \"test result\"), 1"
       "Error reading resource test://123: Wrong number of arguments: #[nil (\"test result\") (t) nil \"Generic handler to return a test string.\"], 1"))))
+
+;;; Multi-server isolation tests
+
+(ert-deftest mcp-server-lib-test-multi-server-tool-dispatch ()
+  "Test multi-server tool isolation.
+Verifies that tools with the same ID registered to different servers via
+:server-id parameter maintain separate namespaces."
+  (mcp-server-lib-ert-with-server :tools nil :resources nil
+    (mcp-server-lib-test--register-tool
+      #'mcp-server-lib-test--return-string
+      :id "test-tool"
+      :description "Server 1 tool"
+      :server-id "server1"
+      (mcp-server-lib-test--register-tool
+        #'mcp-server-lib-test--tool-handler-empty-string
+        :id "test-tool"
+        :description "Server 2 tool"
+        :server-id "server2"
+        ;; Verify server1 has exactly its tool with correct properties
+        (let ((mcp-server-lib-ert-server-id "server1"))
+          (mcp-server-lib-test--verify-tool-list-request
+           '(("test-tool" . ((description . "Server 1 tool"))))))
+
+        ;; Verify server2 has exactly its tool with correct properties
+        (let ((mcp-server-lib-ert-server-id "server2"))
+          (mcp-server-lib-test--verify-tool-list-request
+           '(("test-tool" . ((description . "Server 2 tool"))))))
+
+        ;; Call tool on server1 - should get "test result"
+        (let ((mcp-server-lib-ert-server-id "server1"))
+          (should (string= "test result"
+                           (mcp-server-lib-ert-call-tool "test-tool" nil))))
+
+        ;; Call tool on server2 - should get ""
+        (let ((mcp-server-lib-ert-server-id "server2"))
+          (should (string= ""
+                           (mcp-server-lib-ert-call-tool "test-tool" nil))))))))
+
+(ert-deftest mcp-server-lib-test-multi-server-resource-dispatch ()
+  "Test multi-server resource isolation.
+Verifies that resources with the same URI registered to different servers via
+:server-id parameter maintain separate namespaces."
+  (mcp-server-lib-ert-with-server :tools nil :resources nil
+    (mcp-server-lib-test--register-resource
+      "test://resource"
+      #'mcp-server-lib-test--return-string
+      :name "Test Resource"
+      :description "Server 1 resource"
+      :server-id "server1"
+      (mcp-server-lib-test--register-resource
+        "test://resource"
+        #'mcp-server-lib-test--tool-handler-empty-string
+        :name "Test Resource"
+        :description "Server 2 resource"
+        :server-id "server2"
+        ;; Verify server1 has exactly its resource with correct properties
+        (let ((mcp-server-lib-ert-server-id "server1"))
+          (mcp-server-lib-test--check-single-resource
+           '((uri . "test://resource")
+             (name . "Test Resource")
+             (description . "Server 1 resource"))))
+
+        ;; Verify server2 has exactly its resource with correct properties
+        (let ((mcp-server-lib-ert-server-id "server2"))
+          (mcp-server-lib-test--check-single-resource
+           '((uri . "test://resource")
+             (name . "Test Resource")
+             (description . "Server 2 resource"))))
+
+        ;; Read from server1 - should get "test result"
+        (let ((mcp-server-lib-ert-server-id "server1"))
+          (mcp-server-lib-ert-verify-resource-read
+           "test://resource"
+           '((uri . "test://resource")
+             (text . "test result"))))
+
+        ;; Read from server2 - should get ""
+        (let ((mcp-server-lib-ert-server-id "server2"))
+          (mcp-server-lib-ert-verify-resource-read
+           "test://resource"
+           '((uri . "test://resource")
+             (text . ""))))))))
+
+(ert-deftest mcp-server-lib-test-multi-server-template-dispatch ()
+  "Test multi-server resource template isolation.
+Verifies that resource templates with the same pattern registered to different
+servers via :server-id parameter maintain separate namespaces."
+  (mcp-server-lib-ert-with-server :tools nil :resources nil
+    (mcp-server-lib-test--register-resource
+      "test://{id}"
+      #'mcp-server-lib-test--resource-template-handler-dump-params
+      :name "Test Template"
+      :server-id "server1"
+      (mcp-server-lib-test--register-resource
+        "test://{id}"
+        #'mcp-server-lib-test--resource-template-handler-dump-params-2
+        :name "Test Template"
+        :server-id "server2"
+        ;; Verify server1 has exactly its template with correct properties
+        (let ((mcp-server-lib-ert-server-id "server1"))
+          (mcp-server-lib-test--check-single-template
+           '((uriTemplate . "test://{id}")
+             (name . "Test Template"))))
+
+        ;; Verify server2 has exactly its template with correct properties
+        (let ((mcp-server-lib-ert-server-id "server2"))
+          (mcp-server-lib-test--check-single-template
+           '((uriTemplate . "test://{id}")
+             (name . "Test Template"))))
+
+        ;; Read from server1 - should get handler 1 output
+        (let ((mcp-server-lib-ert-server-id "server1"))
+          (mcp-server-lib-ert-verify-resource-read
+           "test://123"
+           '((uri . "test://123")
+             (text . "params: ((\"id\" . \"123\"))"))))
+
+        ;; Read from server2 - should get handler 2 output
+        (let ((mcp-server-lib-ert-server-id "server2"))
+          (mcp-server-lib-ert-verify-resource-read
+           "test://123"
+           '((uri . "test://123")
+             (text . "Handler-2: params: ((\"id\" . \"123\"))"))))))))
 
 (provide 'mcp-server-lib-test)
 

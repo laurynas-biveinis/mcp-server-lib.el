@@ -22,6 +22,7 @@ set -eu -o pipefail
 INIT_FUNCTION=""
 STOP_FUNCTION=""
 SOCKET=""
+SERVER_ID=""
 EMACS_MCP_DEBUG_LOG=${EMACS_MCP_DEBUG_LOG:-""}
 
 # Debug logging setup
@@ -64,9 +65,13 @@ while [ $# -gt 0 ]; do
 		SOCKET="${1#--socket=}"
 		shift
 		;;
+	--server-id=*)
+		SERVER_ID="${1#--server-id=}"
+		shift
+		;;
 	*)
 		echo "Unknown option: $1" >&2
-		echo "Usage: $0 [--init-function=name] [--stop-function=name] [--socket=path]" >&2
+		echo "Usage: $0 [--init-function=name] [--stop-function=name] [--socket=path] [--server-id=id]" >&2
 		exit 1
 		;;
 	esac
@@ -83,8 +88,25 @@ fi
 # Log init function info if provided
 if [ -n "$INIT_FUNCTION" ]; then
 	mcp_debug_log "INFO" "Using init function: $INIT_FUNCTION"
+
+	# Derive server-id from init function if not explicitly provided
+	# This is a hack for backwards compatibility and will be removed later
+	if [ -z "$SERVER_ID" ]; then
+		# Extract server-id by removing -mcp-enable suffix
+		SERVER_ID="${INIT_FUNCTION%-mcp-enable}"
+		mcp_debug_log "INFO" "Derived server-id from init function: $SERVER_ID"
+	fi
 else
 	mcp_debug_log "INFO" "No init function specified"
+fi
+
+# Log server-id
+if [ -n "$SERVER_ID" ]; then
+	mcp_debug_log "INFO" "Using server-id: $SERVER_ID"
+else
+	# Default to "default" if not specified
+	SERVER_ID="default"
+	mcp_debug_log "INFO" "Using default server-id: $SERVER_ID"
 fi
 
 # Initialize MCP if init function is provided
@@ -125,7 +147,7 @@ while read -r line; do
 	# Process JSON-RPC request and return the result with proper UTF-8 encoding
 	# Encode the response to base64 to avoid any character encoding issues
 	# Handle nil responses from notifications by converting to empty string
-	elisp_expr="(base64-encode-string (encode-coding-string (or (mcp-server-lib-process-jsonrpc (base64-decode-string \"$base64_input\")) \"\") 'utf-8 t) t)"
+	elisp_expr="(base64-encode-string (encode-coding-string (or (mcp-server-lib-process-jsonrpc (base64-decode-string \"$base64_input\") \"$SERVER_ID\") \"\") 'utf-8 t) t)"
 
 	# Get response from emacsclient - capture stderr for debugging
 	stderr_file="/tmp/mcp-stderr.$$-$(date +%s%N)"

@@ -158,38 +158,42 @@ Returns the function name for symbols, \"lambda\" for lambdas,
    (t
     "unknown")))
 
-(defun mcp-server-lib--insert-usage-metrics (metrics)
+(defun mcp-server-lib--insert-usage-metrics (metrics &optional indent)
   "Insert usage statistics for METRICS into the current buffer.
 METRICS should be a mcp-server-lib-metrics struct or nil.
+INDENT is an optional string prepended to the line (defaults to \"  \").
 If METRICS is provided, inserts the call count and error count.
 If METRICS is nil, inserts \"0 calls\" as the usage."
-  (if metrics
-      (let ((calls (mcp-server-lib-metrics-calls metrics))
-            (errors (mcp-server-lib-metrics-errors metrics)))
-        (insert
-         (format "    Usage: %d calls, %d errors\n" calls errors)))
-    (insert "    Usage: 0 calls\n")))
+  (let ((prefix (or indent "  ")))
+    (if metrics
+        (let ((calls (mcp-server-lib-metrics-calls metrics))
+              (errors (mcp-server-lib-metrics-errors metrics)))
+          (insert
+           (format "%s  Usage: %d calls, %d errors\n" prefix calls errors)))
+      (insert (format "%s  Usage: 0 calls\n" prefix)))))
 
 (defun mcp-server-lib--insert-item-properties
-    (name description &optional extra-props)
+    (name description &optional extra-props indent)
   "Insert item properties NAME, DESCRIPTION, and EXTRA-PROPS.
 NAME is always inserted (required property).
 DESCRIPTION is only inserted if non-nil (optional property).
 EXTRA-PROPS is an optional plist of additional properties to display.
+INDENT is an optional string prepended to each line (defaults to \"  \").
 Properties in EXTRA-PROPS with nil values are skipped."
-  (insert (format "    Name: %s\n" name))
-  (when description
-    (insert (format "    Description: %s\n" description)))
-  (let ((props extra-props))
-    (while props
-      (let ((key (car props))
-            (value (cadr props)))
-        (when value
-          (insert
-           (format "    %s: %s\n"
-                   (capitalize (substring (symbol-name key) 1))
-                   value)))
-        (setq props (cddr props))))))
+  (let ((prefix (or indent "  ")))
+    (insert (format "%s  Name: %s\n" prefix name))
+    (when description
+      (insert (format "%s  Description: %s\n" prefix description)))
+    (let ((props extra-props))
+      (while props
+        (let ((key (car props))
+              (value (cadr props)))
+          (when value
+            (insert
+             (format "%s  %s: %s\n" prefix
+                     (capitalize (substring (symbol-name key) 1))
+                     value)))
+          (setq props (cddr props)))))))
 
 (defun mcp-server-lib--entry-key-lessp (a b)
   "Compare alist entries A and B by their keys alphabetically.
@@ -246,67 +250,121 @@ Optional INDENT adds spaces before the key."
              (if mcp-server-lib--running
                  "Running"
                "Stopped")))
+    ;; Only show Tools section if there are actual tools
+    (when (and mcp-server-lib--tools
+               (> (hash-table-count mcp-server-lib--tools) 0)
+               (cl-some (lambda (entry)
+                          (let ((tools-table (cdr entry)))
+                            (and tools-table
+                                 (> (hash-table-count tools-table) 0))))
+                        (mcp-server-lib--hash-table-to-sorted-alist
+                         mcp-server-lib--tools)))
+      (insert "Tools:\n"))
     (mcp-server-lib--with-hash-table-entries mcp-server-lib--tools
-        "Tools:\n"
-      (let* ((id (car entry))
-             (tool (cdr entry))
-             (description (plist-get tool :description))
-             (handler (plist-get tool :handler))
-             (handler-name (mcp-server-lib--get-handler-name handler))
-             (metrics-key (format "tools/call:%s" id))
-             (metrics
-              (gethash metrics-key mcp-server-lib-metrics--table)))
-        (insert (format "  %s\n" id))
-        (insert (format "    Description: %s\n" description))
-        (when (plist-member tool :title)
-          (insert (format "    Title: %s\n" (plist-get tool :title))))
-        (when (plist-member tool :read-only)
-          (insert
-           (format "    Read-only: %s\n"
-                   (plist-get tool :read-only))))
-        (insert (format "    Handler: %s\n" handler-name))
-        (mcp-server-lib--insert-usage-metrics metrics)
-        (insert "\n")))
+        ""
+      (let* ((server-id (car entry))
+             (tools-table (cdr entry))
+             (multi-server (> (hash-table-count mcp-server-lib--tools) 1)))
+        (when multi-server
+          (insert (format "  Server: %s\n" server-id)))
+        (mcp-server-lib--with-hash-table-entries tools-table
+            ""
+          (let* ((id (car entry))
+                 (tool (cdr entry))
+                 (description (plist-get tool :description))
+                 (handler (plist-get tool :handler))
+                 (handler-name (mcp-server-lib--get-handler-name handler))
+                 (metrics-key (format "tools/call:%s" id))
+                 (metrics
+                  (gethash metrics-key mcp-server-lib-metrics--table))
+                 (indent (if multi-server "    " "  ")))
+            (insert (format "%s%s\n" indent id))
+            (insert (format "%s  Description: %s\n" indent description))
+            (when (plist-member tool :title)
+              (insert (format "%s  Title: %s\n" indent (plist-get tool :title))))
+            (when (plist-member tool :read-only)
+              (insert
+               (format "%s  Read-only: %s\n" indent
+                       (plist-get tool :read-only))))
+            (insert (format "%s  Handler: %s\n" indent handler-name))
+            (mcp-server-lib--insert-usage-metrics metrics indent)
+            (insert "\n")))))
+    ;; Only show Resources section if there are actual resources
+    (when (and mcp-server-lib--resources
+               (> (hash-table-count mcp-server-lib--resources) 0)
+               (cl-some (lambda (entry)
+                          (let ((resources-table (cdr entry)))
+                            (and resources-table
+                                 (> (hash-table-count resources-table) 0))))
+                        (mcp-server-lib--hash-table-to-sorted-alist
+                         mcp-server-lib--resources)))
+      (insert "\nResources:\n"))
     (mcp-server-lib--with-hash-table-entries mcp-server-lib--resources
-        "\nResources:\n"
-      (let* ((uri (car entry))
-             (resource (cdr entry))
-             (name (plist-get resource :name))
-             (description (plist-get resource :description))
-             (mime-type
-              (or (plist-get resource :mime-type) "text/plain"))
-             (handler (plist-get resource :handler))
-             (handler-name (mcp-server-lib--get-handler-name handler))
-             (metrics-key (format "resources/read:%s" uri))
-             (metrics
-              (gethash metrics-key mcp-server-lib-metrics--table)))
-        (insert (format "  %s\n" uri))
-        (mcp-server-lib--insert-item-properties
-         name description
-         (list :mime-type mime-type))
-        (insert (format "    Handler: %s\n" handler-name))
-        (mcp-server-lib--insert-usage-metrics metrics)
-        (insert "\n")))
-    (mcp-server-lib--with-hash-table-entries
-        mcp-server-lib--resource-templates
-        (if mcp-server-lib--resources
-            "Resource Templates:\n"
-          "\nResource Templates:\n")
-      (let* ((uri (car entry))
-             (template (cdr entry))
-             (name (plist-get template :name))
-             (description (plist-get template :description))
-             (mime-type
-              (or (plist-get template :mime-type) "text/plain"))
-             (handler (plist-get template :handler))
-             (handler-name
-              (mcp-server-lib--get-handler-name handler)))
-        (insert (format "  %s\n" uri))
-        (mcp-server-lib--insert-item-properties
-         name description
-         (list :mime-type mime-type))
-        (insert (format "    Handler: %s\n" handler-name))
-        (insert "\n")))
+        ""
+      (let* ((server-id (car entry))
+             (resources-table (cdr entry))
+             (multi-server (> (hash-table-count mcp-server-lib--resources) 1)))
+        (when multi-server
+          (insert (format "  Server: %s\n" server-id)))
+        (mcp-server-lib--with-hash-table-entries resources-table
+            ""
+          (let* ((uri (car entry))
+                 (resource (cdr entry))
+                 (name (plist-get resource :name))
+                 (description (plist-get resource :description))
+                 (mime-type
+                  (or (plist-get resource :mime-type) "text/plain"))
+                 (handler (plist-get resource :handler))
+                 (handler-name (mcp-server-lib--get-handler-name handler))
+                 (metrics-key (format "resources/read:%s" uri))
+                 (metrics
+                  (gethash metrics-key mcp-server-lib-metrics--table))
+                 (indent (if multi-server "    " "  ")))
+            (insert (format "%s%s\n" indent uri))
+            (mcp-server-lib--insert-item-properties
+             name description
+             (list :mime-type mime-type)
+             indent)
+            (insert (format "%s  Handler: %s\n" indent handler-name))
+            (mcp-server-lib--insert-usage-metrics metrics indent)
+            (insert "\n")))))
+    ;; Only show resource templates if there are any
+    (when (and mcp-server-lib--resource-templates
+               (> (hash-table-count mcp-server-lib--resource-templates) 0)
+               (cl-some (lambda (entry)
+                          (let ((templates-table (cdr entry)))
+                            (and templates-table
+                                 (> (hash-table-count templates-table) 0))))
+                        (mcp-server-lib--hash-table-to-sorted-alist
+                         mcp-server-lib--resource-templates)))
+      (insert "\nResource Templates:\n")
+      (mcp-server-lib--with-hash-table-entries
+          mcp-server-lib--resource-templates
+          ""
+        (let* ((server-id (car entry))
+               (templates-table (cdr entry))
+               (multi-server (> (hash-table-count mcp-server-lib--resource-templates) 1)))
+          (when multi-server
+            (insert (format "  Server: %s\n" server-id)))
+          (mcp-server-lib--with-hash-table-entries templates-table
+              ""
+            (let* ((uri (car entry))
+                   (template (cdr entry))
+                   (name (plist-get template :name))
+                   (description (plist-get template :description))
+                   (mime-type
+                    (or (plist-get template :mime-type) "text/plain"))
+                   (handler (plist-get template :handler))
+                   (handler-name
+                    (mcp-server-lib--get-handler-name handler))
+                   (indent (if multi-server "    " "  ")))
+              (insert (format "%s%s\n" indent uri))
+              (mcp-server-lib--insert-item-properties
+               name description
+               (list :mime-type mime-type)
+               indent)
+              (insert (format "%s  Handler: %s\n" indent handler-name))
+              (insert "\n"))))))
     (display-buffer (current-buffer))))
 
 ;;;###autoload

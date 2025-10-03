@@ -165,13 +165,7 @@ Captures metrics before BODY execution and asserts after that:
 
 Arguments:
   METHOD - The MCP method name to track (e.g., \"tools/list\")
-  BODY - Forms to execute while tracking metrics
-
-Example:
-  (mcp-server-lib-ert-verify-req-success \"tools/list\"
-    (let ((response (mcp-server-lib-process-jsonrpc-parsed request)))
-      (should-not (alist-get \\='error response))
-      (alist-get \\='result response)))"
+  BODY - Forms to execute"
   (declare (indent defun) (debug t))
   `(mcp-server-lib-ert-with-metrics-tracking ((,method 1 0))
      ,@body))
@@ -195,7 +189,9 @@ Example:
     ;; tools now contains the tools array from the response
     (should (arrayp tools)))"
   (mcp-server-lib-ert-verify-req-success method
-    (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed request)))
+    (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed
+                     request
+                     mcp-server-lib-ert-server-id)))
       (mcp-server-lib-ert--validate-jsonrpc-response
        resp-obj 'result))))
 
@@ -310,18 +306,7 @@ This macro:
 Arguments:
   TOOLS - If non-nil, expects server to have tools capability
   RESOURCES - If non-nil, expects server to have resources capability
-  BODY - Forms to execute with server running
-
-Example:
-  ;; Test with no capabilities expected
-  (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (let ((response (mcp-server-lib-process-jsonrpc-parsed request)))
-      (should (alist-get \\='result response))))
-
-  ;; Test with tools capability expected
-  (mcp-server-lib-ert-with-server :tools t :resources nil
-    (let ((tools (mcp-server-lib-ert-get-resource-list)))
-      (should (arrayp tools))))"
+  BODY - Forms to execute with server running"
  (declare (indent defun) (debug t))
  `(unwind-protect
       (progn
@@ -335,7 +320,8 @@ Example:
          (mcp-server-lib-process-jsonrpc
           (json-encode
            '(("jsonrpc" . "2.0")
-             ("method" . "notifications/initialized")))))
+             ("method" . "notifications/initialized")))
+          mcp-server-lib-ert-server-id))
         ,@body)
     (mcp-server-lib-stop)))
 
@@ -358,7 +344,9 @@ Example:
   (let ((request
          (mcp-server-lib-create-resources-read-request
           uri mcp-server-lib-ert--resource-read-request-id)))
-    (mcp-server-lib-process-jsonrpc-parsed request)))
+    (mcp-server-lib-process-jsonrpc-parsed
+     request
+     mcp-server-lib-ert-server-id)))
 
 (defun mcp-server-lib-ert-verify-resource-read (uri expected-fields)
   "Verify that reading resource at URI succeeds with EXPECTED-FIELDS.
@@ -408,7 +396,9 @@ Returns:
               (mcp-server-lib-create-tools-call-request
                tool-name nil params))
              (response
-              (mcp-server-lib-process-jsonrpc-parsed request)))
+              (mcp-server-lib-process-jsonrpc-parsed
+               request
+               mcp-server-lib-ert-server-id)))
         (should-not (alist-get 'error response))
         (mcp-server-lib-ert-check-text-response response)))))
 

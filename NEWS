@@ -3,6 +3,22 @@ mcp-server-lib.el NEWS -- history of user-visible changes
 * Changes in mcp-server-lib 0.2.0 (unreleased)
 
 ** New Features
+*** Multi-server support
+    Multiple MCP servers can now run in the same Emacs daemon with complete
+    isolation of tools and resources. Add the optional :server-id parameter to
+    registration functions:
+
+    (mcp-server-lib-register-tool handler
+      :id "tool-name"
+      :description "..."
+      :server-id "my-server")
+
+    The stdio script automatically derives server-id from the init function name
+    (stripping the -mcp-enable suffix), or you can specify it explicitly with
+    --server-id=name.
+
+    Backward compatible: omitting :server-id uses the default server "default".
+
 *** New command to inspect MCP server setup
     M-x mcp-server-lib-describe-setup shows all registered tools, resources,
     and resource templates along with their properties, handler functions, and

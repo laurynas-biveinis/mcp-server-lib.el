@@ -351,6 +351,82 @@ rm "$debug_log_file"
 rm -f "stdio-response.txt"
 TESTS_RUN=$((TESTS_RUN + 1))
 
+TEST_CASE="Test case 7: Multi-server tool isolation via --server-id"
+
+# Setup: Register same tool ID to two different servers with different handlers
+emacsclient -s "$TEST_SERVER_NAME" -e "
+(progn
+  (defun mcp-test--server1-handler ()
+    \"Handler for server1\"
+    \"result-from-server1\")
+
+  (defun mcp-test--server2-handler ()
+    \"Handler for server2\"
+    \"result-from-server2\")
+
+  (mcp-server-lib-register-tool
+   #'mcp-test--server1-handler
+   :id \"multi-server-tool\"
+   :description \"Test tool\"
+   :server-id \"stdio-server1\")
+
+  (mcp-server-lib-register-tool
+   #'mcp-test--server2-handler
+   :id \"multi-server-tool\"
+   :description \"Test tool\"
+   :server-id \"stdio-server2\"))
+" >/dev/null
+
+# Requests
+INIT='{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}},"id":1}'
+NOTIF='{"jsonrpc":"2.0","method":"notifications/initialized"}'
+TOOLS_LIST='{"jsonrpc":"2.0","method":"tools/list","id":2}'
+CALL='{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"multi-server-tool"}}'
+
+# Test server1
+printf "%s\n%s\n%s\n%s\n" "$INIT" "$NOTIF" "$TOOLS_LIST" "$CALL" |
+	$STDIO_CMD --server-id=stdio-server1 >stdio-s1.txt
+
+# Verify tools/list shows exactly 1 tool
+TOOLS_RESP=$(sed -n '2p' stdio-s1.txt)
+TOOL_COUNT=$(echo "$TOOLS_RESP" | grep -o '"name":"multi-server-tool"' | wc -l)
+if [ "$TOOL_COUNT" -ne 1 ]; then
+	echo "$TEST_CASE"
+	echo "FAIL: Server1 should see exactly 1 tool, saw $TOOL_COUNT"
+	cat stdio-s1.txt
+	exit 1
+fi
+
+# Verify tools/call returns server1's result
+if ! sed -n '3p' stdio-s1.txt | grep -q '"text":"result-from-server1"'; then
+	echo "$TEST_CASE"
+	echo "FAIL: Server1 should return 'result-from-server1'"
+	cat stdio-s1.txt
+	exit 1
+fi
+
+# Test server2
+printf "%s\n%s\n%s\n%s\n" "$INIT" "$NOTIF" "$TOOLS_LIST" "$CALL" |
+	$STDIO_CMD --server-id=stdio-server2 >stdio-s2.txt
+
+# Verify tools/call returns server2's result
+if ! sed -n '3p' stdio-s2.txt | grep -q '"text":"result-from-server2"'; then
+	echo "$TEST_CASE"
+	echo "FAIL: Server2 should return 'result-from-server2'"
+	cat stdio-s2.txt
+	exit 1
+fi
+
+# Cleanup
+emacsclient -s "$TEST_SERVER_NAME" -e "
+(progn
+  (mcp-server-lib-unregister-tool \"multi-server-tool\" \"stdio-server1\")
+  (mcp-server-lib-unregister-tool \"multi-server-tool\" \"stdio-server2\"))
+" >/dev/null
+
+rm -f stdio-s1.txt stdio-s2.txt
+TESTS_RUN=$((TESTS_RUN + 1))
+
 # Stop the MCP server at the end
 run_emacs_function "mcp-server-lib-stop" "Failed to stop MCP at end"
 
