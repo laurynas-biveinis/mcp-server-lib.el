@@ -2650,6 +2650,10 @@ from a function loaded from bytecode rather than interpreted elisp."
      "test://{id}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Test Template"
+     ;; Verify the template is registered
+     (mcp-server-lib-test--check-single-template
+      '((uriTemplate . "test://{id}")
+        (name . "Test Template")))
      ;; Try to read with non-matching URI
      (mcp-server-lib-test--read-resource-error
       "other://123"
@@ -2718,6 +2722,10 @@ from a function loaded from bytecode rather than interpreted elisp."
      "error://{id}"
      #'mcp-server-lib-test--template-handler-error
      :name "Error Template"
+     ;; Verify the template is registered
+     (mcp-server-lib-test--check-single-template
+      '((uriTemplate . "error://{id}")
+        (name . "Error Template")))
      (mcp-server-lib-test--check-resource-read-error
        "error://test"
        mcp-server-lib-jsonrpc-error-internal
@@ -2730,6 +2738,10 @@ from a function loaded from bytecode rather than interpreted elisp."
      "nil://{id}"
      #'mcp-server-lib-test--resource-template-handler-nil
      :name "Nil Template"
+     ;; Verify the template is registered
+     (mcp-server-lib-test--check-single-template
+      '((uriTemplate . "nil://{id}")
+        (name . "Nil Template")))
      ;; Read the resource
      (mcp-server-lib-ert-verify-resource-read
       "nil://test"
@@ -2743,6 +2755,10 @@ from a function loaded from bytecode rather than interpreted elisp."
      "undefined://{id}"
      #'mcp-server-lib-test--handler-to-be-undefined
      :name "Undefined Handler Template"
+     ;; Verify the template is registered
+     (mcp-server-lib-test--check-single-template
+      '((uriTemplate . "undefined://{id}")
+        (name . "Undefined Handler Template")))
      (mcp-server-lib-test--with-undefined-function
       'mcp-server-lib-test--handler-to-be-undefined
        (mcp-server-lib-ert-with-metrics-tracking
