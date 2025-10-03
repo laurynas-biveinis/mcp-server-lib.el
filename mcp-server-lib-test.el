@@ -650,15 +650,23 @@ EXPECTED-FIELDS is an alist of (field . value) pairs to verify."
       (dolist (field expected-fields)
         (should (equal (alist-get (car field) resource) (cdr field)))))))
 
-(defun mcp-server-lib-test--check-single-template (expected-fields)
-  "Check the template list to contain exactly one template with EXPECTED-FIELDS.
-EXPECTED-FIELDS is an alist of (field . value) pairs to verify."
+(defun mcp-server-lib-test--check-templates (expected-templates)
+  "Verify that the template list contains exactly EXPECTED-TEMPLATES.
+EXPECTED-TEMPLATES is a list of alists, where each alist contains
+\(field . value) pairs to verify for one template.  The verification is
+order-independent, matching templates by their \\='uriTemplate field."
   (let ((templates (mcp-server-lib-ert-get-resource-templates-list)))
-    (should (= 1 (length templates)))
-    (let ((template (aref templates 0)))
-      (should (= (length expected-fields) (length template)))
-      (dolist (field expected-fields)
-        (should (equal (alist-get (car field) template) (cdr field)))))))
+    (should (= (length expected-templates) (length templates)))
+    (dolist (expected-fields expected-templates)
+      (let* ((uri-template (alist-get 'uriTemplate expected-fields))
+             (template (mcp-server-lib-test--find-resource-by-uri-template
+                        uri-template templates)))
+        (unless template
+          (ert-fail (format "Template with uriTemplate '%s' not found in templates list"
+                            uri-template)))
+        (should (= (length expected-fields) (length template)))
+        (dolist (field expected-fields)
+          (should (equal (alist-get (car field) template) (cdr field))))))))
 
 (defmacro mcp-server-lib-test--check-resource-read-error
     (uri expected-code expected-message)
@@ -2651,9 +2659,9 @@ from a function loaded from bytecode rather than interpreted elisp."
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Test Template"
      ;; Verify the template is registered
-     (mcp-server-lib-test--check-single-template
-      '((uriTemplate . "test://{id}")
-        (name . "Test Template")))
+     (mcp-server-lib-test--check-templates
+      '(((uriTemplate . "test://{id}")
+         (name . "Test Template"))))
      ;; Try to read with non-matching URI
      (mcp-server-lib-test--read-resource-error
       "other://123"
@@ -2723,9 +2731,9 @@ from a function loaded from bytecode rather than interpreted elisp."
      #'mcp-server-lib-test--template-handler-error
      :name "Error Template"
      ;; Verify the template is registered
-     (mcp-server-lib-test--check-single-template
-      '((uriTemplate . "error://{id}")
-        (name . "Error Template")))
+     (mcp-server-lib-test--check-templates
+      '(((uriTemplate . "error://{id}")
+         (name . "Error Template"))))
      (mcp-server-lib-test--check-resource-read-error
        "error://test"
        mcp-server-lib-jsonrpc-error-internal
@@ -2739,9 +2747,9 @@ from a function loaded from bytecode rather than interpreted elisp."
      #'mcp-server-lib-test--resource-template-handler-nil
      :name "Nil Template"
      ;; Verify the template is registered
-     (mcp-server-lib-test--check-single-template
-      '((uriTemplate . "nil://{id}")
-        (name . "Nil Template")))
+     (mcp-server-lib-test--check-templates
+      '(((uriTemplate . "nil://{id}")
+         (name . "Nil Template"))))
      ;; Read the resource
      (mcp-server-lib-ert-verify-resource-read
       "nil://test"
@@ -2756,9 +2764,9 @@ from a function loaded from bytecode rather than interpreted elisp."
      #'mcp-server-lib-test--handler-to-be-undefined
      :name "Undefined Handler Template"
      ;; Verify the template is registered
-     (mcp-server-lib-test--check-single-template
-      '((uriTemplate . "undefined://{id}")
-        (name . "Undefined Handler Template")))
+     (mcp-server-lib-test--check-templates
+      '(((uriTemplate . "undefined://{id}")
+         (name . "Undefined Handler Template"))))
      (mcp-server-lib-test--with-undefined-function
       'mcp-server-lib-test--handler-to-be-undefined
        (mcp-server-lib-ert-with-metrics-tracking
@@ -2801,8 +2809,11 @@ from a function loaded from bytecode rather than interpreted elisp."
       #'mcp-server-lib-test--resource-template-handler-dump-params-2
       :name "Uppercase Template"
       ;; Both templates should be registered
-      (let ((resources (mcp-server-lib-ert-get-resource-templates-list)))
-        (should (= 2 (length resources))))
+      (mcp-server-lib-test--check-templates
+       '(((uriTemplate . "test://{username}")
+          (name . "Lowercase Template"))
+         ((uriTemplate . "test://{USERNAME}")
+          (name . "Uppercase Template"))))
       ;; Test that they extract different variables
       (mcp-server-lib-ert-verify-resource-read
        "test://john"
@@ -2825,8 +2836,11 @@ from a function loaded from bytecode rather than interpreted elisp."
         (format "UPPERCASE PATH: %s" (alist-get "id" params nil nil #'string=)))
       :name "Uppercase Path Template"
       ;; Both templates should be registered
-      (let ((resources (mcp-server-lib-ert-get-resource-templates-list)))
-        (should (= 2 (length resources))))
+      (mcp-server-lib-test--check-templates
+       '(((uriTemplate . "test://path/{id}")
+          (name . "Lowercase Path Template"))
+         ((uriTemplate . "test://PATH/{id}")
+          (name . "Uppercase Path Template"))))
       ;; Test lowercase path matches only lowercase template
       (mcp-server-lib-ert-verify-resource-read
        "test://path/123"
@@ -2921,8 +2935,11 @@ from a function loaded from bytecode rather than interpreted elisp."
        '((uri . "test://item/123")
          (text . "params: ((\"id\" . \"item/123\"))")))
       ;; Verify both templates are registered
-      (let ((resources (mcp-server-lib-ert-get-resource-templates-list)))
-        (should (= 2 (length resources))))))))
+      (mcp-server-lib-test--check-templates
+       '(((uriTemplate . "test://{id}")
+          (name . "General template"))
+         ((uriTemplate . "test://item/{id}")
+          (name . "Specific template"))))))))
 
 (ert-deftest test-mcp-server-lib-resources-read-malformed-params ()
   "Test resources/read with invalid params structure (string instead of object)."
@@ -3074,15 +3091,15 @@ servers via :server-id parameter maintain separate namespaces."
         :server-id "server2"
         ;; Verify server1 has exactly its template with correct properties
         (let ((mcp-server-lib-ert-server-id "server1"))
-          (mcp-server-lib-test--check-single-template
-           '((uriTemplate . "test://{id}")
-             (name . "Test Template"))))
+          (mcp-server-lib-test--check-templates
+           '(((uriTemplate . "test://{id}")
+              (name . "Test Template")))))
 
         ;; Verify server2 has exactly its template with correct properties
         (let ((mcp-server-lib-ert-server-id "server2"))
-          (mcp-server-lib-test--check-single-template
-           '((uriTemplate . "test://{id}")
-             (name . "Test Template"))))
+          (mcp-server-lib-test--check-templates
+           '(((uriTemplate . "test://{id}")
+              (name . "Test Template")))))
 
         ;; Read from server1 - should get handler 1 output
         (let ((mcp-server-lib-ert-server-id "server1"))
