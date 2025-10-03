@@ -458,7 +458,7 @@ Arguments:
                  ,server-and-body))))
     server-and-body))
 
-(defmacro mcp-server-lib-test--register-resource (uri handler &rest props-and-body)
+(defmacro mcp-server-lib-test--with-resource (uri handler &rest props-and-body)
   "Register a resource, execute body, then unregister.
 Register a resource at URI with HANDLER and properties.
 This is a simpler alternative to `mcp-server-lib-test--with-resources' for cases
@@ -571,7 +571,7 @@ Arguments:
                      ;; Verify templates appear in the template list
                      ,@(mapcar #'mcp-server-lib-test--build-resource-verification
                                template-resources)))))))
-    ;; Build nested mcp-server-lib-test--register-resource calls
+    ;; Build nested mcp-server-lib-test--with-resource calls
     ;; wrapping server start, verification, and body execution
     (let ((server-and-body
            `(mcp-server-lib-ert-with-server :tools nil :resources t
@@ -584,7 +584,7 @@ Arguments:
                (handler (cadr resource-spec))
                (props (cddr resource-spec)))
           (setq server-and-body
-                `(mcp-server-lib-test--register-resource ,uri ,handler ,@props
+                `(mcp-server-lib-test--with-resource ,uri ,handler ,@props
                    ,server-and-body))))
       server-and-body)))
 
@@ -871,7 +871,7 @@ When both are registered, capabilities should include both fields."
    :id "test-tool"
    :description "Test tool"
 
-   (mcp-server-lib-test--register-resource
+   (mcp-server-lib-test--with-resource
     "test://resource"
     #'mcp-server-lib-test--return-string
     :name "Test Resource"
@@ -1904,18 +1904,18 @@ from a function loaded from bytecode rather than interpreted elisp."
     (#'mcp-server-lib-test--tool-handler-empty-string :id "apple-tool" :description "Apple test tool"
                                                       :title "Apple Tool Title")
     ((lambda () "Mouse tool result") :id "mouse-tool" :description "Mouse test tool with lambda handler"))
-   (mcp-server-lib-test--register-resource
+   (mcp-server-lib-test--with-resource
     "zebra://resource"
     #'mcp-server-lib-test--return-string
     :name "Zebra Resource"
     :description "Zebra resource description"
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "apple://resource"
      (lambda () "Apple resource content")
      :name "Apple Resource"
      :description "Apple resource description"
      :mime-type "application/json"
-     (mcp-server-lib-test--register-resource
+     (mcp-server-lib-test--with-resource
       "mouse://resource"
       #'mcp-server-lib-test--return-string
       :name "Mouse Resource"
@@ -2239,7 +2239,7 @@ from a function loaded from bytecode rather than interpreted elisp."
      :name "Test Resource"))
    ;; The macro automatically verifies the resource is in the list
    ;; Now register the same resource again to test ref counting
-   (mcp-server-lib-test--register-resource
+   (mcp-server-lib-test--with-resource
     "test://resource1"
     #'mcp-server-lib-test--return-string
     :name "Test Resource"
@@ -2607,12 +2607,12 @@ from a function loaded from bytecode rather than interpreted elisp."
   "Test that direct resources take precedence over resource templates."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
     ;; Register template first
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "test://{id}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Template Resource"
      ;; Register direct resource with URI that would match template
-     (mcp-server-lib-test--register-resource
+     (mcp-server-lib-test--with-resource
       "test://exact"
       #'mcp-server-lib-test--return-string
       :name "Direct Resource"
@@ -2625,11 +2625,11 @@ from a function loaded from bytecode rather than interpreted elisp."
 (ert-deftest test-mcp-server-lib-resources-read-multiple-template-schemes ()
   "Test that resource templates with different schemes route correctly."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "org://{filename}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Org Files"
-     (mcp-server-lib-test--register-resource
+     (mcp-server-lib-test--with-resource
       "doc://{docname}"
       #'mcp-server-lib-test--resource-template-handler-dump-params-2
       :name "Doc Files"
@@ -2645,7 +2645,7 @@ from a function loaded from bytecode rather than interpreted elisp."
 (ert-deftest test-mcp-server-lib-resources-read-no-template-match ()
   "Test error when no resource template matches the URI."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "test://{id}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Test Template"
@@ -2717,7 +2717,7 @@ from a function loaded from bytecode rather than interpreted elisp."
 (ert-deftest test-mcp-server-lib-resources-read-template-handler-error ()
   "Test template handler errors bumping metrics and returning JSON-RPC errors."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "error://{id}"
      #'mcp-server-lib-test--template-handler-error
      :name "Error Template"
@@ -2733,7 +2733,7 @@ from a function loaded from bytecode rather than interpreted elisp."
 (ert-deftest test-mcp-server-lib-resources-read-template-handler-nil ()
   "Test nil-returning template handler produces valid response with empty text."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "nil://{id}"
      #'mcp-server-lib-test--resource-template-handler-nil
      :name "Nil Template"
@@ -2750,7 +2750,7 @@ from a function loaded from bytecode rather than interpreted elisp."
 (ert-deftest test-mcp-server-lib-resources-read-template-handler-undefined ()
   "Test reading a resource template whose handler function no longer exists."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "undefined://{id}"
      #'mcp-server-lib-test--handler-to-be-undefined
      :name "Undefined Handler Template"
@@ -2790,12 +2790,12 @@ from a function loaded from bytecode rather than interpreted elisp."
   "Test that variable names in templates are case-sensitive per RFC 6570."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
     ;; Register template with lowercase variable
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "test://{username}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Lowercase Template"
      ;; Register template with uppercase variable (different template)
-     (mcp-server-lib-test--register-resource
+     (mcp-server-lib-test--with-resource
       "test://{USERNAME}"
       #'mcp-server-lib-test--resource-template-handler-dump-params-2
       :name "Uppercase Template"
@@ -2816,12 +2816,12 @@ from a function loaded from bytecode rather than interpreted elisp."
   "Test that literal path segments are case-sensitive."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
     ;; Register template with lowercase path
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "test://path/{id}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "Lowercase Path Template"
      ;; Register template with uppercase path
-     (mcp-server-lib-test--register-resource
+     (mcp-server-lib-test--with-resource
       "test://PATH/{id}"
       (lambda (params)
         (format "UPPERCASE PATH: %s" (alist-get "id" params nil nil #'string=)))
@@ -2873,7 +2873,7 @@ from a function loaded from bytecode rather than interpreted elisp."
 (ert-deftest test-mcp-server-lib-resource-template-percent-encoded-extraction ()
   "Test that extracted parameters remain percent-encoded."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "file://{path}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "File template"
@@ -2897,7 +2897,7 @@ from a function loaded from bytecode rather than interpreted elisp."
     test-mcp-server-lib-resource-template-reserved-expansion-passthrough ()
   "Test that {+var} allows reserved chars without encoding."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "file:///{+path}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "File path template"
@@ -2911,12 +2911,12 @@ from a function loaded from bytecode rather than interpreted elisp."
   "Test which template wins when multiple could match."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
     ;; Register general template first
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
      "test://{id}"
      #'mcp-server-lib-test--resource-template-handler-dump-params
      :name "General template"
      ;; Register more specific template second
-     (mcp-server-lib-test--register-resource
+     (mcp-server-lib-test--with-resource
       "test://item/{id}"
       #'mcp-server-lib-test--resource-template-handler-dump-params-2
       :name "Specific template"
@@ -3016,13 +3016,13 @@ Verifies that tools with the same ID registered to different servers via
   "Test multi-server resource isolation.
 Verifies that resources with the same URI registered to different servers via
 :server-id parameter maintain separate namespaces."
-  (mcp-server-lib-test--register-resource
+  (mcp-server-lib-test--with-resource
     "test://resource"
     #'mcp-server-lib-test--return-string
     :name "Test Resource"
     :description "Server 1 resource"
     :server-id "server1"
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
       "test://resource"
       #'mcp-server-lib-test--tool-handler-empty-string
       :name "Test Resource"
@@ -3049,12 +3049,12 @@ Verifies that resources with the same URI registered to different servers via
   "Test multi-server resource template isolation.
 Verifies that resource templates with the same pattern registered to different
 servers via :server-id parameter maintain separate namespaces."
-  (mcp-server-lib-test--register-resource
+  (mcp-server-lib-test--with-resource
     "test://{id}"
     #'mcp-server-lib-test--resource-template-handler-dump-params
     :name "Test Template"
     :server-id "server1"
-    (mcp-server-lib-test--register-resource
+    (mcp-server-lib-test--with-resource
       "test://{id}"
       #'mcp-server-lib-test--resource-template-handler-dump-params-2
       :name "Test Template"
