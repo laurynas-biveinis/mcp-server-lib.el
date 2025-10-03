@@ -660,6 +660,29 @@ then verifies that both calls and errors increased by 1 at both levels."
     (should (arrayp result))
     result))
 
+(defun mcp-server-lib-test--verify-single-tool-param-desc
+    (param-name expected-type expected-desc-regex)
+  "Verify parameter type and description for a single tool.
+Asserts that exactly one tool exists, parameter has correct type,
+and description matches expected pattern.
+
+PARAM-NAME: parameter name (symbol).
+EXPECTED-TYPE: expected type string (e.g., \"string\").
+EXPECTED-DESC-REGEX: regex that must match the description."
+  (let* ((tools (mcp-server-lib-test--get-tool-list))
+         (tool (progn
+                 (should (= 1 (length tools)))
+                 (aref tools 0)))
+         (schema (alist-get 'inputSchema tool))
+         (properties (alist-get 'properties schema))
+         (param-prop (alist-get param-name properties)))
+    (should (equal "object" (alist-get 'type schema)))
+    (should param-prop)
+    (should (equal expected-type (alist-get 'type param-prop)))
+    (let ((desc (alist-get 'description param-prop)))
+      (should (stringp desc))
+      (should (string-match-p expected-desc-regex desc)))))
+
 (defun mcp-server-lib-test--check-no-resources ()
   "Check that the resource list is empty."
   (let ((resources (mcp-server-lib-ert-get-resource-list)))
@@ -1040,24 +1063,8 @@ like 'org-id' were incorrectly parsed as new parameter definitions."
         :id "multiline-param-tool"
         :description "Tool with multi-line parameter description"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
-      (let* ((result (mcp-server-lib-ert-get-success-result
-                      "tools/list"
-                      (mcp-server-lib-create-tools-list-request)))
-             (tool-list (alist-get 'tools result))
-             (tool (elt tool-list 0))
-             (schema (alist-get 'inputSchema tool))
-             (properties (alist-get 'properties schema))
-             (uri-prop (alist-get 'uri properties)))
-        ;; Verify the schema structure
-        (should (equal "object" (alist-get 'type schema)))
-        ;; Check uri property exists
-        (should uri-prop)
-        (should (equal "string" (alist-get 'type uri-prop)))
-        ;; Check description contains both parts of the multi-line description
-        (let ((desc (alist-get 'description uri-prop)))
-          (should (stringp desc))
-          (should (string-match-p "org-headline://" desc))
-          (should (string-match-p "org-id://" desc)))))))
+      (mcp-server-lib-test--verify-single-tool-param-desc
+       'uri "string" ".*org-headline://.*org-id://.*"))))
 
 (ert-deftest mcp-server-lib-test-register-tool-error-tab-indented-param ()
   "Test that tab-indented parameters are rejected.
@@ -1106,21 +1113,8 @@ are processed without errors."
         :id "empty-continuation-tool"
         :description "Tool with empty continuation line"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
-      (let* ((result (mcp-server-lib-ert-get-success-result
-                      "tools/list"
-                      (mcp-server-lib-create-tools-list-request)))
-             (tool-list (alist-get 'tools result))
-             (tool (elt tool-list 0))
-             (schema (alist-get 'inputSchema tool))
-             (properties (alist-get 'properties schema))
-             (param1-prop (alist-get 'param1 properties)))
-        (should (equal "object" (alist-get 'type schema)))
-        (should param1-prop)
-        (should (equal "string" (alist-get 'type param1-prop)))
-        (let ((desc (alist-get 'description param1-prop)))
-          (should (stringp desc))
-          (should (string-match-p "first line" desc))
-          (should (string-match-p "second line after empty" desc)))))))
+      (mcp-server-lib-test--verify-single-tool-param-desc
+       'param1 "string" "^first line second line after empty$"))))
 
 (ert-deftest mcp-server-lib-test-register-tool-multiple-continuations ()
   "Test that multiple continuation lines are concatenated correctly.
@@ -1131,23 +1125,8 @@ and concatenates them with spaces."
         :id "multiple-continuations-tool"
         :description "Tool with multiple continuation lines"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
-      (let* ((result (mcp-server-lib-ert-get-success-result
-                      "tools/list"
-                      (mcp-server-lib-create-tools-list-request)))
-             (tool-list (alist-get 'tools result))
-             (tool (elt tool-list 0))
-             (schema (alist-get 'inputSchema tool))
-             (properties (alist-get 'properties schema))
-             (param1-prop (alist-get 'param1 properties)))
-        (should (equal "object" (alist-get 'type schema)))
-        (should param1-prop)
-        (should (equal "string" (alist-get 'type param1-prop)))
-        (let ((desc (alist-get 'description param1-prop)))
-          (should (stringp desc))
-          (should (string-match-p "line one" desc))
-          (should (string-match-p "line two" desc))
-          (should (string-match-p "line three" desc))
-          (should (string-match-p "line four" desc)))))))
+      (mcp-server-lib-test--verify-single-tool-param-desc
+       'param1 "string" "^line one line two line three line four$"))))
 
 (ert-deftest mcp-server-lib-test-register-tool-five-space-indent ()
   "Test that 5-space indentation lines are silently ignored.
@@ -1158,22 +1137,9 @@ and continuation 6+) are skipped but parsing continues."
         :id "five-space-indent-tool"
         :description "Tool with 5-space indentation"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
-      (let* ((result (mcp-server-lib-ert-get-success-result
-                      "tools/list"
-                      (mcp-server-lib-create-tools-list-request)))
-             (tool-list (alist-get 'tools result))
-             (tool (elt tool-list 0))
-             (schema (alist-get 'inputSchema tool))
-             (properties (alist-get 'properties schema))
-             (param1-prop (alist-get 'param1 properties)))
-        (should (equal "object" (alist-get 'type schema)))
-        (should param1-prop)
-        (should (equal "string" (alist-get 'type param1-prop)))
-        (let ((desc (alist-get 'description param1-prop)))
-          (should (stringp desc))
-          (should (string-match-p "description" desc))
-          (should (string-match-p "but this continuation should work" desc))
-          (should-not (string-match-p "5 spaces" desc)))))))
+      (mcp-server-lib-test--verify-single-tool-param-desc
+       'param1 "string"
+       "^description but this continuation should work$"))))
 
 (ert-deftest mcp-server-lib-test-register-tool-special-param-chars ()
   "Test that special characters in parameter names are handled correctly.
