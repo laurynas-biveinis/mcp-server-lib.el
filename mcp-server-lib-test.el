@@ -730,34 +730,35 @@ EXPECTED-TOOLS should be an alist of (tool-name . tool-properties)."
                  prop-value (alist-get prop-name found-tool)))))))))))
 
 (defun mcp-server-lib-test--verify-tool-schema-in-single-tool-list
-    (&optional param-name param-type param-description)
-  "Verify that schema of the only tool in the tool list has correct structure.
-When PARAM-NAME is nil, verifies a zero-argument tool schema.
-Otherwise, verifies a one-parameter tool schema with:
-PARAM-NAME as the name of the parameter to validate.
-PARAM-TYPE as the expected type of the parameter.
-PARAM-DESCRIPTION as the expected description of the parameter."
+    (param-specs)
+  "Verify schema of the only tool in the tool list.
+PARAM-SPECS is a list of (NAME TYPE DESCRIPTION) for each parameter.
+Empty list verifies a zero-parameter tool."
   (let* ((tools (mcp-server-lib-test--get-tool-list))
          (tool (aref tools 0))
          (schema (alist-get 'inputSchema tool)))
     (should (equal "object" (alist-get 'type schema)))
 
-    (if param-name
-        (progn
-          ;; One parameter case - verify required and properties
-          (should
-           (equal (vector param-name) (alist-get 'required schema)))
-          (let ((param-schema
-                 (alist-get
-                  (intern param-name)
-                  (alist-get 'properties schema))))
-            (should (equal param-type (alist-get 'type param-schema)))
-            (should
-             (equal
-              param-description
-              (alist-get 'description param-schema)))))
+    (if param-specs
+        ;; One or more parameters
+        (let* ((properties (alist-get 'properties schema))
+               (required (alist-get 'required schema))
+               (param-names (mapcar #'car param-specs)))
+          ;; Verify each parameter
+          (dolist (spec param-specs)
+            (let* ((name (nth 0 spec))
+                   (type (nth 1 spec))
+                   (desc (nth 2 spec))
+                   (prop (alist-get (intern name) properties)))
+              (should prop)
+              (should (equal type (alist-get 'type prop)))
+              (should (equal desc (alist-get 'description prop)))))
 
-      ;; Zero parameter case - schema should be just {type: "object"}
+          ;; Verify required array contains all params
+          (dolist (name param-names)
+            (should (seq-contains-p required name))))
+
+      ;; Zero parameters
       (should-not (alist-get 'required schema))
       (should-not (alist-get 'properties schema)))))
 
@@ -1059,24 +1060,9 @@ the hyphen separator in parameter definitions."
         :id "whitespace-hyphen-tool"
         :description "Tool with whitespace around hyphens"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
-      (let* ((result (mcp-server-lib-ert-get-success-result
-                      "tools/list"
-                      (mcp-server-lib-create-tools-list-request)))
-             (tool-list (alist-get 'tools result))
-             (tool (elt tool-list 0))
-             (schema (alist-get 'inputSchema tool))
-             (properties (alist-get 'properties schema))
-             (param1-prop (alist-get 'param1 properties))
-             (param2-prop (alist-get 'param2 properties)))
-        (should (equal "object" (alist-get 'type schema)))
-        (should param1-prop)
-        (should (equal "string" (alist-get 'type param1-prop)))
-        (should (equal "multiple spaces around hyphen"
-                       (alist-get 'description param1-prop)))
-        (should param2-prop)
-        (should (equal "string" (alist-get 'type param2-prop)))
-        (should (equal "tab characters around hyphen"
-                       (alist-get 'description param2-prop)))))))
+      (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
+       '(("param1" "string" "multiple spaces around hyphen")
+         ("param2" "string" "tab characters around hyphen"))))))
 
 (ert-deftest mcp-server-lib-test-register-tool-empty-continuation ()
   "Test that empty continuation lines are handled correctly.
@@ -1165,29 +1151,10 @@ like hyphens, underscores, and dots in parameter names."
         :id "special-param-chars-tool"
         :description "Tool with special chars in parameter names"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
-      (let* ((result (mcp-server-lib-ert-get-success-result
-                      "tools/list"
-                      (mcp-server-lib-create-tools-list-request)))
-             (tool-list (alist-get 'tools result))
-             (tool (elt tool-list 0))
-             (schema (alist-get 'inputSchema tool))
-             (properties (alist-get 'properties schema))
-             (param-name-prop (alist-get 'param-name properties))
-             (param_name-prop (alist-get 'param_name properties))
-             (param.name-prop (alist-get 'param\.name properties)))
-        (should (equal "object" (alist-get 'type schema)))
-        (should param-name-prop)
-        (should (equal "string" (alist-get 'type param-name-prop)))
-        (should (equal "parameter with hyphen"
-                       (alist-get 'description param-name-prop)))
-        (should param_name-prop)
-        (should (equal "string" (alist-get 'type param_name-prop)))
-        (should (equal "parameter with underscore"
-                       (alist-get 'description param_name-prop)))
-        (should param.name-prop)
-        (should (equal "string" (alist-get 'type param.name-prop)))
-        (should (equal "parameter with dot"
-                       (alist-get 'description param.name-prop)))))))
+      (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
+       '(("param-name" "string" "parameter with hyphen")
+         ("param_name" "string" "parameter with underscore")
+         ("param.name" "string" "parameter with dot"))))))
 
 (ert-deftest mcp-server-lib-test-register-tool-error-duplicate-id ()
   "Test reference counting behavior when registering a tool with duplicate ID.
@@ -1236,9 +1203,7 @@ from a function loaded from bytecode rather than interpreted elisp."
           :id "bytecode-handler"
           :description "A tool with a handler loaded from bytecode"))
       (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
-       "input-string"
-       "string"
-       "Input string parameter for bytecode testing"))
+       '(("input-string" "string" "Input string parameter for bytecode testing"))))
 
     (when (file-exists-p bytecode-file)
       (delete-file bytecode-file))))
@@ -1441,7 +1406,7 @@ from a function loaded from bytecode rather than interpreted elisp."
         :description "A tool that requires an argument"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
       (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
-       "input-string" "string" "test parameter for string input"))))
+       '(("input-string" "string" "test parameter for string input"))))))
 
 (ert-deftest mcp-server-lib-test-tools-list-schema-two-param-handler ()
   "Test that `tools/list` schema includes multiple parameter descriptions."
@@ -1450,32 +1415,9 @@ from a function loaded from bytecode rather than interpreted elisp."
         :id "two-params"
         :description "A tool that requires two arguments"))
     (mcp-server-lib-ert-verify-req-success "tools/list"
-      (let* ((result (mcp-server-lib-ert-get-success-result
-                      "tools/list"
-                      (mcp-server-lib-create-tools-list-request)))
-             (tool-list (alist-get 'tools result))
-             (tool (elt tool-list 0))
-             (schema (alist-get 'inputSchema tool))
-             (properties (alist-get 'properties schema))
-             (required (alist-get 'required schema))
-             (first-name-prop (alist-get 'first-name properties))
-             (last-name-prop (alist-get 'last-name properties)))
-        ;; Verify the schema structure
-        (should (equal "object" (alist-get 'type schema)))
-        ;; Check properties exist with original parameter names
-        (should first-name-prop)
-        (should last-name-prop)
-        ;; Check descriptions exist (don't check exact quotes due to text-quoting-style)
-        (should (stringp (alist-get 'description first-name-prop)))
-        (should (stringp (alist-get 'description last-name-prop)))
-        (should (string-match-p "first name" (alist-get 'description first-name-prop)))
-        (should (string-match-p "last name" (alist-get 'description last-name-prop)))
-        ;; Check types
-        (should (equal "string" (alist-get 'type first-name-prop)))
-        (should (equal "string" (alist-get 'type last-name-prop)))
-        ;; Check required fields (required is a vector)
-        (should (seq-contains-p required "first-name"))
-        (should (seq-contains-p required "last-name"))))))
+      (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
+       '(("first-name" "string" "Person's first name")
+         ("last-name" "string" "Person's last name"))))))
 
 (ert-deftest mcp-server-lib-test-tools-call-two-param-handler ()
   "Test invoking a tool with two parameters."
@@ -1685,7 +1627,7 @@ from a function loaded from bytecode rather than interpreted elisp."
       ((#'mcp-server-lib-test--tool-handler-empty-string
         :id "empty-string-tool"
         :description "A tool that returns an empty string"))
-    (mcp-server-lib-test--verify-tool-schema-in-single-tool-list)
+    (mcp-server-lib-test--verify-tool-schema-in-single-tool-list '())
 
     (let ((result (mcp-server-lib-ert-call-tool "empty-string-tool" nil)))
       (should (string= "" result)))))

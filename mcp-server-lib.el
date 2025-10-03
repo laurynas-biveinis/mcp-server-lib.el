@@ -287,7 +287,9 @@ doesn't match function arguments, or if any parameter is not documented."
 Returns a schema object suitable for tool registration.
 Extracts parameter descriptions from the docstring if available."
   (let* ((arglist (help-function-arglist func t))
-         (docstring (documentation func))
+         ;; Use RAW=t to prevent substitute-command-keys from converting
+         ;; apostrophes to fancy quotes, preserving exact documentation text
+         (docstring (documentation func t))
          (param-descriptions
           (mcp-server-lib--extract-param-descriptions
            docstring arglist)))
