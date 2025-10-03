@@ -345,6 +345,31 @@ MCP Parameters:
 
 ;;; Test helpers
 
+(defmacro mcp-server-lib-test--with-servers (server-specs &rest body)
+  "Initialize multiple servers and run BODY.
+SERVER-SPECS is a list of (SERVER-ID :tools BOOL :resources BOOL) specs."
+  (declare (indent 1) (debug t))
+  `(unwind-protect
+       (progn
+         (mcp-server-lib-start)
+         (dolist (spec ,server-specs)
+           (let ((server-id (car spec))
+                 (tools (plist-get (cdr spec) :tools))
+                 (resources (plist-get (cdr spec) :resources)))
+             (let ((mcp-server-lib-ert-server-id server-id))
+               (mcp-server-lib-ert-assert-initialize-result
+                (mcp-server-lib-ert--get-initialize-result)
+                tools
+                resources))
+             (should-not
+              (mcp-server-lib-process-jsonrpc
+               (json-encode
+                '(("jsonrpc" . "2.0")
+                  ("method" . "notifications/initialized")))
+               server-id))))
+         ,@body)
+     (mcp-server-lib-stop)))
+
 (defmacro mcp-server-lib-test--with-undefined-function (function-symbol &rest body)
   "Execute BODY with FUNCTION-SYMBOL undefined, then restore it.
 FUNCTION-SYMBOL should be a quoted symbol.
@@ -2998,27 +3023,19 @@ from a function loaded from bytecode rather than interpreted elisp."
   "Test multi-server tool isolation.
 Verifies that tools with the same ID registered to different servers via
 :server-id parameter maintain separate namespaces."
-  (mcp-server-lib-ert-with-server :tools nil :resources nil
+  (mcp-server-lib-test--register-tool
+    #'mcp-server-lib-test--return-string
+    :id "test-tool"
+    :description "Server 1 tool"
+    :server-id "server1"
     (mcp-server-lib-test--register-tool
-      #'mcp-server-lib-test--return-string
+      #'mcp-server-lib-test--tool-handler-empty-string
       :id "test-tool"
-      :description "Server 1 tool"
-      :server-id "server1"
-      (mcp-server-lib-test--register-tool
-        #'mcp-server-lib-test--tool-handler-empty-string
-        :id "test-tool"
-        :description "Server 2 tool"
-        :server-id "server2"
-        ;; Verify server1 has exactly its tool with correct properties
-        (let ((mcp-server-lib-ert-server-id "server1"))
-          (mcp-server-lib-test--verify-tool-list-request
-           '(("test-tool" . ((description . "Server 1 tool"))))))
-
-        ;; Verify server2 has exactly its tool with correct properties
-        (let ((mcp-server-lib-ert-server-id "server2"))
-          (mcp-server-lib-test--verify-tool-list-request
-           '(("test-tool" . ((description . "Server 2 tool"))))))
-
+      :description "Server 2 tool"
+      :server-id "server2"
+      (mcp-server-lib-test--with-servers
+          '(("server1" :tools t :resources nil)
+            ("server2" :tools t :resources nil))
         ;; Call tool on server1 - should get "test result"
         (let ((mcp-server-lib-ert-server-id "server1"))
           (should (string= "test result"
@@ -3033,33 +3050,21 @@ Verifies that tools with the same ID registered to different servers via
   "Test multi-server resource isolation.
 Verifies that resources with the same URI registered to different servers via
 :server-id parameter maintain separate namespaces."
-  (mcp-server-lib-ert-with-server :tools nil :resources nil
+  (mcp-server-lib-test--register-resource
+    "test://resource"
+    #'mcp-server-lib-test--return-string
+    :name "Test Resource"
+    :description "Server 1 resource"
+    :server-id "server1"
     (mcp-server-lib-test--register-resource
       "test://resource"
-      #'mcp-server-lib-test--return-string
+      #'mcp-server-lib-test--tool-handler-empty-string
       :name "Test Resource"
-      :description "Server 1 resource"
-      :server-id "server1"
-      (mcp-server-lib-test--register-resource
-        "test://resource"
-        #'mcp-server-lib-test--tool-handler-empty-string
-        :name "Test Resource"
-        :description "Server 2 resource"
-        :server-id "server2"
-        ;; Verify server1 has exactly its resource with correct properties
-        (let ((mcp-server-lib-ert-server-id "server1"))
-          (mcp-server-lib-test--check-single-resource
-           '((uri . "test://resource")
-             (name . "Test Resource")
-             (description . "Server 1 resource"))))
-
-        ;; Verify server2 has exactly its resource with correct properties
-        (let ((mcp-server-lib-ert-server-id "server2"))
-          (mcp-server-lib-test--check-single-resource
-           '((uri . "test://resource")
-             (name . "Test Resource")
-             (description . "Server 2 resource"))))
-
+      :description "Server 2 resource"
+      :server-id "server2"
+      (mcp-server-lib-test--with-servers
+          '(("server1" :tools nil :resources t)
+            ("server2" :tools nil :resources t))
         ;; Read from server1 - should get "test result"
         (let ((mcp-server-lib-ert-server-id "server1"))
           (mcp-server-lib-ert-verify-resource-read
@@ -3078,29 +3083,19 @@ Verifies that resources with the same URI registered to different servers via
   "Test multi-server resource template isolation.
 Verifies that resource templates with the same pattern registered to different
 servers via :server-id parameter maintain separate namespaces."
-  (mcp-server-lib-ert-with-server :tools nil :resources nil
+  (mcp-server-lib-test--register-resource
+    "test://{id}"
+    #'mcp-server-lib-test--resource-template-handler-dump-params
+    :name "Test Template"
+    :server-id "server1"
     (mcp-server-lib-test--register-resource
       "test://{id}"
-      #'mcp-server-lib-test--resource-template-handler-dump-params
+      #'mcp-server-lib-test--resource-template-handler-dump-params-2
       :name "Test Template"
-      :server-id "server1"
-      (mcp-server-lib-test--register-resource
-        "test://{id}"
-        #'mcp-server-lib-test--resource-template-handler-dump-params-2
-        :name "Test Template"
-        :server-id "server2"
-        ;; Verify server1 has exactly its template with correct properties
-        (let ((mcp-server-lib-ert-server-id "server1"))
-          (mcp-server-lib-test--check-templates
-           '(((uriTemplate . "test://{id}")
-              (name . "Test Template")))))
-
-        ;; Verify server2 has exactly its template with correct properties
-        (let ((mcp-server-lib-ert-server-id "server2"))
-          (mcp-server-lib-test--check-templates
-           '(((uriTemplate . "test://{id}")
-              (name . "Test Template")))))
-
+      :server-id "server2"
+      (mcp-server-lib-test--with-servers
+          '(("server1" :tools nil :resources t)
+            ("server2" :tools nil :resources t))
         ;; Read from server1 - should get handler 1 output
         (let ((mcp-server-lib-ert-server-id "server1"))
           (mcp-server-lib-ert-verify-resource-read

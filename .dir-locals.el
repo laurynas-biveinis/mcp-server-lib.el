@@ -6,6 +6,7 @@
                      (elisp-lint-indent-specs . ((if-let* . 1)
                                                  (if-let . 1)
                                                  (mcp-server-lib-test--with-server . 0)
+                                                 (mcp-server-lib-test--with-servers . 1)
                                                  (mcp-server-lib-test--with-tools . 1)
                                                  (mcp-server-lib-test--register-tool . 1)
                                                  (mcp-server-lib-test--with-resources . 1)
