@@ -217,6 +217,45 @@ MCP Parameters:
   last-name - Person's last name"
   (format "Hello, %s %s %s!" title first-name last-name))
 
+(defun mcp-server-lib-test--tool-handler-one-optional-param
+    (required-param &optional optional-param)
+  "Test handler with one required and one optional parameter.
+REQUIRED-PARAM is mandatory, OPTIONAL-PARAM is optional.
+
+MCP Parameters:
+  required-param - A required parameter
+  optional-param - An optional parameter"
+  (if optional-param
+      (format "Required: %s, Optional: %s" required-param optional-param)
+    (format "Required: %s" required-param)))
+
+(defun mcp-server-lib-test--tool-handler-all-optional (&optional param-a param-b)
+  "Test handler with all optional parameters.
+PARAM-A and PARAM-B are both optional.
+
+MCP Parameters:
+  param-a - First optional parameter
+  param-b - Second optional parameter"
+  (cond
+   ((and param-a param-b) (format "Both: %s, %s" param-a param-b))
+   (param-a (format "Only A: %s" param-a))
+   (param-b (format "Only B: %s" param-b))
+   (t "None provided")))
+
+(defun mcp-server-lib-test--tool-handler-some-optional
+    (required-param &optional optional-a optional-b)
+  "Test handler with one required and multiple optional parameters.
+REQUIRED-PARAM is mandatory, OPTIONAL-A and OPTIONAL-B are optional.
+
+MCP Parameters:
+  required-param - A required parameter
+  optional-a - First optional parameter
+  optional-b - Second optional parameter"
+  (format "Required: %s%s%s"
+          required-param
+          (if optional-a (format ", A: %s" optional-a) "")
+          (if optional-b (format ", B: %s" optional-b) "")))
+
 (defun mcp-server-lib-test--tool-handler-multiline-param (uri)
   "Test handler with multi-line parameter description containing hyphens.
 URI is the resource identifier.
@@ -786,10 +825,13 @@ EXPECTED-TOOLS should be an alist of (tool-name . tool-properties)."
                  prop-value (alist-get prop-name found-tool)))))))))))
 
 (defun mcp-server-lib-test--verify-tool-schema-in-single-tool-list
-    (param-specs)
+    (param-specs &optional optional-param-names)
   "Verify schema of the only tool in the tool list.
 PARAM-SPECS is a list of (NAME TYPE DESCRIPTION) for each parameter.
-Empty list verifies a zero-parameter tool."
+Empty list verifies a zero-parameter tool.
+
+OPTIONAL-PARAM-NAMES is a list of parameter names that are optional.
+If omitted, all parameters are treated as required."
   (let* ((tools (mcp-server-lib-test--get-tool-list))
          (tool (aref tools 0))
          (schema (alist-get 'inputSchema tool)))
@@ -799,7 +841,11 @@ Empty list verifies a zero-parameter tool."
         ;; One or more parameters
         (let* ((properties (alist-get 'properties schema))
                (required (alist-get 'required schema))
-               (param-names (mapcar #'car param-specs)))
+               (param-names (mapcar #'car param-specs))
+               ;; Compute required params: all params minus optional ones
+               (required-names (cl-remove-if
+                                (lambda (name) (member name optional-param-names))
+                                param-names)))
           ;; Verify each parameter
           (dolist (spec param-specs)
             (let* ((name (nth 0 spec))
@@ -810,9 +856,8 @@ Empty list verifies a zero-parameter tool."
               (should (equal type (alist-get 'type prop)))
               (should (equal desc (alist-get 'description prop)))))
 
-          ;; Verify required array contains all params
-          (dolist (name param-names)
-            (should (seq-contains-p required name))))
+          ;; Verify required array contains expected required params
+          (should (equal (vconcat required-names) required)))
 
       ;; Zero parameters
       (should-not (alist-get 'required schema))
@@ -1418,6 +1463,46 @@ from a function loaded from bytecode rather than interpreted elisp."
        '(("first-name" "string" "Person's first name")
          ("last-name" "string" "Person's last name"))))))
 
+(ert-deftest mcp-server-lib-test-tools-list-schema-optional-param ()
+  "Test that `tools/list` schema correctly marks optional parameters.
+Parameters after &optional should not be in the required array."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-one-optional-param
+        :id "optional-param"
+        :description "A tool with one optional parameter"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
+       '(("required-param" "string" "A required parameter")
+         ("optional-param" "string" "An optional parameter"))
+       '("optional-param")))))
+
+(ert-deftest mcp-server-lib-test-tools-list-schema-all-optional ()
+  "Test that `tools/list` schema correctly handles all optional parameters.
+When all parameters are optional, required array should be empty."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-all-optional
+        :id "all-optional"
+        :description "A tool with all optional parameters"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
+       '(("param-a" "string" "First optional parameter")
+         ("param-b" "string" "Second optional parameter"))
+       '("param-a" "param-b")))))
+
+(ert-deftest mcp-server-lib-test-tools-list-schema-multiple-optional ()
+  "Test schema with one required and multiple optional parameters.
+Only the required parameter should be in the required array."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-some-optional
+        :id "multiple-optional"
+        :description "A tool with multiple optional parameters"))
+    (mcp-server-lib-ert-verify-req-success "tools/list"
+      (mcp-server-lib-test--verify-tool-schema-in-single-tool-list
+       '(("required-param" "string" "A required parameter")
+         ("optional-a" "string" "First optional parameter")
+         ("optional-b" "string" "Second optional parameter"))
+       '("optional-a" "optional-b")))))
+
 (ert-deftest mcp-server-lib-test-tools-call-two-param-handler ()
   "Test invoking a tool with two parameters."
   (mcp-server-lib-test--with-tools
@@ -1438,6 +1523,86 @@ from a function loaded from bytecode rather than interpreted elisp."
            (result (mcp-server-lib-ert-call-tool "three-params" args)))
       (should (string= "Hello, Dr Jane Smith!" result)))))
 
+(ert-deftest mcp-server-lib-test-tools-call-optional-param-with-all-params ()
+  "Test invoking a tool with optional parameter, providing all parameters."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-one-optional-param
+        :id "optional-tool"
+        :description "Tool with optional parameter"))
+    (let* ((args '((required-param . "req") (optional-param . "opt")))
+           (result (mcp-server-lib-ert-call-tool "optional-tool" args)))
+      (should (string= "Required: req, Optional: opt" result)))))
+
+(ert-deftest mcp-server-lib-test-tools-call-optional-param-without-optional ()
+  "Test invoking a tool with optional parameter, omitting the optional one."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-one-optional-param
+        :id "optional-tool"
+        :description "Tool with optional parameter"))
+    (let* ((args '((required-param . "req")))
+           (result (mcp-server-lib-ert-call-tool "optional-tool" args)))
+      (should (string= "Required: req" result)))))
+
+(ert-deftest mcp-server-lib-test-tools-call-all-optional-none-provided ()
+  "Test invoking a tool where all parameters are optional, providing none."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-all-optional
+        :id "all-optional-tool"
+        :description "Tool with all optional parameters"))
+    (let* ((args '())
+           (result (mcp-server-lib-ert-call-tool "all-optional-tool" args)))
+      (should (string= "None provided" result)))))
+
+(ert-deftest mcp-server-lib-test-tools-call-all-optional-some-provided ()
+  "Test invoking a tool where all parameters are optional, providing some."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-all-optional
+        :id "all-optional-tool"
+        :description "Tool with all optional parameters"))
+    (let* ((args '((param-a . "A")))
+           (result (mcp-server-lib-ert-call-tool "all-optional-tool" args)))
+      (should (string= "Only A: A" result)))))
+
+(ert-deftest mcp-server-lib-test-tools-call-multiple-optional-first-only ()
+  "Test tool with multiple optional params, providing first optional only."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-some-optional
+        :id "multi-opt"
+        :description "Tool with multiple optional parameters"))
+    (let* ((args '((required-param . "req") (optional-a . "A")))
+           (result (mcp-server-lib-ert-call-tool "multi-opt" args)))
+      (should (string= "Required: req, A: A" result)))))
+
+(ert-deftest mcp-server-lib-test-tools-call-multiple-optional-sparse ()
+  "Test tool with multiple optional params, providing second optional only.
+This tests sparse optional parameter provision where optional-a is skipped
+but optional-b is provided."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-some-optional
+        :id "multi-opt"
+        :description "Tool with multiple optional parameters"))
+    (let* ((args '((required-param . "req") (optional-b . "B")))
+           (result (mcp-server-lib-ert-call-tool "multi-opt" args)))
+      (should (string= "Required: req, B: B" result)))))
+
+(ert-deftest mcp-server-lib-test-tools-call-optional-missing-required ()
+  "Test error when optional param provided but required param missing.
+Verifies that required parameter validation works correctly even when
+optional parameters are provided."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-one-optional-param
+        :id "optional-tool"
+        :description "Tool with optional parameter"))
+    (let* ((args '((optional-param . "opt")))  ; Missing required-param
+           (request (mcp-server-lib-create-tools-call-request "optional-tool" 42 args))
+           (response (mcp-server-lib-process-jsonrpc-parsed
+                      request
+                      mcp-server-lib-ert-server-id)))
+      (mcp-server-lib-ert-check-error-object
+       response
+       mcp-server-lib-jsonrpc-error-invalid-params
+       "Missing required parameter: required-param"))))
+
 (ert-deftest mcp-server-lib-test-tools-call-missing-required-param ()
   "Test that calling a multi-param tool with missing parameters returns an error."
   (mcp-server-lib-test--with-tools
@@ -1449,13 +1614,11 @@ from a function loaded from bytecode rather than interpreted elisp."
            (request (mcp-server-lib-create-tools-call-request "two-params" 42 args))
            (response (mcp-server-lib-process-jsonrpc-parsed
                       request
-                      mcp-server-lib-ert-server-id))
-           (error-obj (alist-get 'error response)))
-      (should error-obj)
-      (should (equal mcp-server-lib-jsonrpc-error-invalid-params
-                     (alist-get 'code error-obj)))
-      (should (string-match-p "Missing required parameter"
-                               (alist-get 'message error-obj))))))
+                      mcp-server-lib-ert-server-id)))
+      (mcp-server-lib-ert-check-error-object
+       response
+       mcp-server-lib-jsonrpc-error-invalid-params
+       "Missing required parameter: last-name"))))
 
 (ert-deftest mcp-server-lib-test-tools-call-too-many-params ()
   "Test that calling a tool with extra parameters returns an error."

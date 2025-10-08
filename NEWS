@@ -30,6 +30,14 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     conversion. Parameters are validated - missing required parameters or
     unexpected parameters will return appropriate JSON-RPC errors.
 
+*** Optional parameter support
+    Tool schemas and invocation now correctly handle Elisp &optional parameters.
+    Parameters declared with &optional are marked as optional in the JSON schema
+    and can be omitted when calling the tool (passed as nil to the handler).
+    Previously all parameters were incorrectly marked as required and validated
+    as required at runtime, regardless of their optionality in the function
+    signature.
+
 *** Enhanced testing support for MCP servers
     The library now provides testing utilities through the mcp-server-lib-ert
     module for dependent packages.

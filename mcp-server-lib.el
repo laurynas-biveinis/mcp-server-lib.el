@@ -276,7 +276,9 @@ doesn't match function arguments, or if any parameter is not documented."
       ;; Check that all function parameters have descriptions
       (dolist (arg arglist)
         (let ((arg-name (symbol-name arg)))
-          (unless (assoc arg-name descriptions)
+          ;; Skip &optional marker - it's not a parameter
+          (unless (or (string= arg-name "&optional")
+                      (assoc arg-name descriptions))
             (error
              "Function parameter '%s' missing from MCP Parameters section"
              arg-name)))))
@@ -296,22 +298,28 @@ Extracts parameter descriptions from the docstring if available."
     (if arglist
         ;; One or more arguments case
         (let ((properties '())
-              (required '()))
+              (required '())
+              (seen-optional nil))
           (dolist (arg arglist)
-            (let* ((param-name (symbol-name arg))
-                   (description
-                    (cdr (assoc param-name param-descriptions)))
-                   (property-schema `((type . "string"))))
-              ;; Add description if provided
-              (when description
-                (setq property-schema
-                      (cons
-                       `(description . ,description)
-                       property-schema)))
-              ;; Add to properties with original parameter name
-              (push (cons param-name property-schema) properties)
-              ;; Add to required list
-              (push param-name required)))
+            (let ((param-name (symbol-name arg)))
+              (if (string= param-name "&optional")
+                  ;; Mark that we've seen &optional
+                  (setq seen-optional t)
+                ;; Regular parameter - add to properties
+                (let* ((description
+                        (cdr (assoc param-name param-descriptions)))
+                       (property-schema `((type . "string"))))
+                  ;; Add description if provided
+                  (when description
+                    (setq property-schema
+                          (cons
+                           `(description . ,description)
+                           property-schema)))
+                  ;; Add to properties with original parameter name
+                  (push (cons param-name property-schema) properties)
+                  ;; Add to required list only if before &optional
+                  (unless seen-optional
+                    (push param-name required))))))
           `((type . "object")
             (properties . ,(nreverse properties))
             (required . ,(vconcat (nreverse required)))))
@@ -842,25 +850,34 @@ METHOD-METRICS is used to track errors for this method."
                       ;; If undefined, signal early with proper error
                       (signal 'void-function (list handler))))
                    (expected-params '())
+                   (required-params '())
                    (provided-params '())
                    (arg-values '())
+                   (seen-optional nil)
                    (result
                     (progn
-                      ;; Collect expected parameter names
+                      ;; Collect expected and required parameter names
                       (dolist (param arglist)
                         (let ((param-name (symbol-name param)))
-                          (push (intern param-name) expected-params)))
+                          (if (string= param-name "&optional")
+                              ;; Mark that we've seen &optional
+                              (setq seen-optional t)
+                            ;; Regular parameter
+                            (push (intern param-name) expected-params)
+                            ;; Add to required only if before &optional
+                            (unless seen-optional
+                              (push (intern param-name) required-params)))))
                       ;; Collect provided parameter names
                       (dolist (arg tool-args)
                         (push (car arg) provided-params))
-                      ;; Check for missing parameters
-                      (dolist (expected expected-params)
-                        (unless (memq expected provided-params)
+                      ;; Check for missing required parameters
+                      (dolist (required required-params)
+                        (unless (memq required provided-params)
                           (signal
                            'mcp-server-lib-invalid-params
                            (list
                             (format "Missing required parameter: %s"
-                                    expected)))))
+                                    required)))))
                       ;; Check for unexpected parameters
                       (dolist (provided provided-params)
                         (unless (memq provided expected-params)
@@ -871,11 +888,12 @@ METHOD-METRICS is used to track errors for this method."
                                     provided)))))
                       ;; All validation passed, collect values and call handler
                       (dolist (param arglist)
-                        (let* ((param-name (symbol-name param))
-                               (value
-                                (alist-get
-                                 (intern param-name) tool-args)))
-                          (push value arg-values)))
+                        (let ((param-name (symbol-name param)))
+                          (unless (string= param-name "&optional")
+                            (let ((value
+                                   (alist-get
+                                    (intern param-name) tool-args)))
+                              (push value arg-values)))))
                       (apply handler (nreverse arg-values))))
                    ;; Ensure result is string or nil, error on other types
                    (result-text
