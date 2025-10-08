@@ -276,8 +276,9 @@ doesn't match function arguments, or if any parameter is not documented."
       ;; Check that all function parameters have descriptions
       (dolist (arg arglist)
         (let ((arg-name (symbol-name arg)))
-          ;; Skip &optional marker - it's not a parameter
+          ;; Skip &optional and &rest markers - they're not parameters
           (unless (or (string= arg-name "&optional")
+                      (string= arg-name "&rest")
                       (assoc arg-name descriptions))
             (error
              "Function parameter '%s' missing from MCP Parameters section"
@@ -288,43 +289,45 @@ doesn't match function arguments, or if any parameter is not documented."
   "Generate JSON schema by analyzing FUNC's signature.
 Returns a schema object suitable for tool registration.
 Extracts parameter descriptions from the docstring if available."
-  (let* ((arglist (help-function-arglist func t))
-         ;; Use RAW=t to prevent substitute-command-keys from converting
-         ;; apostrophes to fancy quotes, preserving exact documentation text
-         (docstring (documentation func t))
-         (param-descriptions
-          (mcp-server-lib--extract-param-descriptions
-           docstring arglist)))
-    (if arglist
-        ;; One or more arguments case
-        (let ((properties '())
-              (required '())
-              (seen-optional nil))
-          (dolist (arg arglist)
-            (let ((param-name (symbol-name arg)))
-              (if (string= param-name "&optional")
-                  ;; Mark that we've seen &optional
-                  (setq seen-optional t)
-                ;; Regular parameter - add to properties
-                (let* ((description
-                        (cdr (assoc param-name param-descriptions)))
-                       (property-schema `((type . "string"))))
-                  ;; Add description if provided
-                  (when description
-                    (setq property-schema
-                          (cons
-                           `(description . ,description)
-                           property-schema)))
-                  ;; Add to properties with original parameter name
-                  (push (cons param-name property-schema) properties)
-                  ;; Add to required list only if before &optional
-                  (unless seen-optional
-                    (push param-name required))))))
-          `((type . "object")
-            (properties . ,(nreverse properties))
-            (required . ,(vconcat (nreverse required)))))
-      ;; No arguments case
-      '((type . "object")))))
+  (let ((arglist (help-function-arglist func t)))
+    (when (memq '&rest arglist)
+      (error "MCP tool handlers do not support &rest parameters"))
+    (let* (;; Use RAW=t to prevent substitute-command-keys from converting
+           ;; apostrophes to fancy quotes, preserving exact documentation text
+           (docstring (documentation func t))
+           (param-descriptions
+            (mcp-server-lib--extract-param-descriptions
+             docstring arglist)))
+      (if arglist
+          ;; One or more arguments case
+          (let ((properties '())
+                (required '())
+                (seen-optional nil))
+            (dolist (arg arglist)
+              (let ((param-name (symbol-name arg)))
+                (if (string= param-name "&optional")
+                    ;; Mark that we've seen &optional
+                    (setq seen-optional t)
+                  ;; Regular parameter - add to properties
+                  (let* ((description
+                          (cdr (assoc param-name param-descriptions)))
+                         (property-schema `((type . "string"))))
+                    ;; Add description if provided
+                    (when description
+                      (setq property-schema
+                            (cons
+                             `(description . ,description)
+                             property-schema)))
+                    ;; Add to properties with original parameter name
+                    (push (cons param-name property-schema) properties)
+                    ;; Add to required list only if before &optional
+                    (unless seen-optional
+                      (push param-name required))))))
+            `((type . "object")
+              (properties . ,(nreverse properties))
+              (required . ,(vconcat (nreverse required)))))
+        ;; No arguments case
+        '((type . "object"))))))
 
 (defun mcp-server-lib--ref-counted-register (key item table)
   "Register ITEM with KEY in TABLE with reference counting.

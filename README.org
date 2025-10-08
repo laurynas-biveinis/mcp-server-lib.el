@@ -140,6 +140,7 @@ MCP Parameters:
 Tools can have zero, one, or multiple parameters. When a tool has multiple
 parameters, the JSON object fields from the client are automatically mapped to the
 function parameters by name (converting from camelCase to kebab-case as needed).
+Tools do not support =&rest= parameters.
 
 Tool handlers must return strings or =nil= (which is converted to an empty string).
 Other return types will cause an "Invalid Params" error.

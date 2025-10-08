@@ -348,6 +348,12 @@ MCP Parameters:
   "Test tool handler that returning."
   'some-symbol)
 
+(defun mcp-server-lib-test--tool-handler-with-rest (base &rest items)
+  "Test handler with &rest parameter.
+BASE is the base parameter.
+ITEMS are additional items."
+  (format "Base: %s, Items: %S" base items))
+
 ;; Bytecode handler function that will be loaded during tests
 (declare-function mcp-server-lib-test-bytecode-handler--handler
                   "mcp-server-lib-bytecode-handler-test")
@@ -1098,6 +1104,18 @@ When both are registered, capabilities should include both fields."
     :id "missing-param-tool"
     :description "Tool with missing parameter docs")
    :type 'error))
+
+(ert-deftest mcp-server-lib-test-register-tool-error-rest-params ()
+  "Test that tools with &rest parameters are rejected."
+  (let ((err (should-error
+              (mcp-server-lib-register-tool
+               #'mcp-server-lib-test--tool-handler-with-rest
+               :id "rest-param-tool"
+               :description "Tool with rest parameters")
+              :type 'error)))
+    (should (string-match-p
+             "MCP tool handlers do not support &rest parameters"
+             (error-message-string err)))))
 
 (ert-deftest mcp-server-lib-test-register-tool-multiline-param ()
   "Test that multi-line parameter descriptions with hyphens are parsed correctly.
