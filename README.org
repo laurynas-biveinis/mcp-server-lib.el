@@ -26,6 +26,7 @@
 * MCP servers built on this library
 
 - [[https://github.com/laurynas-biveinis/elisp-dev-mcp][elisp-dev-mcp]] - Elisp development support tools
+- [[https://github.com/laurynas-biveinis/org-mcp][org-mcp]] - read and write Org content
 
 * Installation
 
