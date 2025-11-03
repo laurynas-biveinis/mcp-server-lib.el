@@ -52,11 +52,11 @@ The project follows [[https://semver.org/][Semantic Versioning]] (MAJOR.MINOR.PA
 
 6. *Create GitHub release*:
    #+begin_src shell
-   # Extract release notes from NEWS file
+   # Extract release notes from NEWS file, convert from Org to GFM
    # Create release with gh CLI
    gh release create X.Y.Z \
      --title "Release X.Y.Z" \
-     --notes "$(sed -n '/^\* X.Y.Z/,/^\*/p' NEWS | head -n -1)"
+     --notes "..."
    #+end_src
 
 7. *Prepare for next development cycle*:
