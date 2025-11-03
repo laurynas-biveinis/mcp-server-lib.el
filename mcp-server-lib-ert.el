@@ -189,9 +189,9 @@ Example:
     ;; tools now contains the tools array from the response
     (should (arrayp tools)))"
   (mcp-server-lib-ert-verify-req-success method
-    (let ((resp-obj (mcp-server-lib-process-jsonrpc-parsed
-                     request
-                     mcp-server-lib-ert-server-id)))
+    (let ((resp-obj
+           (mcp-server-lib-process-jsonrpc-parsed
+            request mcp-server-lib-ert-server-id)))
       (mcp-server-lib-ert--validate-jsonrpc-response
        resp-obj 'result))))
 
@@ -345,8 +345,7 @@ Arguments:
          (mcp-server-lib-create-resources-read-request
           uri mcp-server-lib-ert--resource-read-request-id)))
     (mcp-server-lib-process-jsonrpc-parsed
-     request
-     mcp-server-lib-ert-server-id)))
+     request mcp-server-lib-ert-server-id)))
 
 (defun mcp-server-lib-ert-verify-resource-read (uri expected-fields)
   "Verify that reading resource at URI succeeds with EXPECTED-FIELDS.
@@ -397,8 +396,7 @@ Returns:
                tool-name nil params))
              (response
               (mcp-server-lib-process-jsonrpc-parsed
-               request
-               mcp-server-lib-ert-server-id)))
+               request mcp-server-lib-ert-server-id)))
         (should-not (alist-get 'error response))
         (mcp-server-lib-ert-check-text-response response)))))
 

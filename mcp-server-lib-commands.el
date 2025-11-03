@@ -169,7 +169,10 @@ If METRICS is nil, inserts \"0 calls\" as the usage."
         (let ((calls (mcp-server-lib-metrics-calls metrics))
               (errors (mcp-server-lib-metrics-errors metrics)))
           (insert
-           (format "%s  Usage: %d calls, %d errors\n" prefix calls errors)))
+           (format "%s  Usage: %d calls, %d errors\n"
+                   prefix
+                   calls
+                   errors)))
       (insert (format "%s  Usage: 0 calls\n" prefix)))))
 
 (defun mcp-server-lib--insert-item-properties
@@ -190,7 +193,8 @@ Properties in EXTRA-PROPS with nil values are skipped."
               (value (cadr props)))
           (when value
             (insert
-             (format "%s  %s: %s\n" prefix
+             (format "%s  %s: %s\n"
+                     prefix
                      (capitalize (substring (symbol-name key) 1))
                      value)))
           (setq props (cddr props)))))))
@@ -253,38 +257,47 @@ Optional INDENT adds spaces before the key."
     ;; Only show Tools section if there are actual tools
     (when (and mcp-server-lib--tools
                (> (hash-table-count mcp-server-lib--tools) 0)
-               (cl-some (lambda (entry)
-                          (let ((tools-table (cdr entry)))
-                            (and tools-table
-                                 (> (hash-table-count tools-table) 0))))
-                        (mcp-server-lib--hash-table-to-sorted-alist
-                         mcp-server-lib--tools)))
+               (cl-some
+                (lambda (entry)
+                  (let ((tools-table (cdr entry)))
+                    (and tools-table
+                         (> (hash-table-count tools-table) 0))))
+                (mcp-server-lib--hash-table-to-sorted-alist
+                 mcp-server-lib--tools)))
       (insert "Tools:\n"))
-    (mcp-server-lib--with-hash-table-entries mcp-server-lib--tools
-        ""
+    (mcp-server-lib--with-hash-table-entries mcp-server-lib--tools ""
       (let* ((server-id (car entry))
              (tools-table (cdr entry))
-             (multi-server (> (hash-table-count mcp-server-lib--tools) 1)))
+             (multi-server
+              (> (hash-table-count mcp-server-lib--tools) 1)))
         (when multi-server
           (insert (format "  Server: %s\n" server-id)))
-        (mcp-server-lib--with-hash-table-entries tools-table
-            ""
+        (mcp-server-lib--with-hash-table-entries tools-table ""
           (let* ((id (car entry))
                  (tool (cdr entry))
                  (description (plist-get tool :description))
                  (handler (plist-get tool :handler))
-                 (handler-name (mcp-server-lib--get-handler-name handler))
+                 (handler-name
+                  (mcp-server-lib--get-handler-name handler))
                  (metrics-key (format "tools/call:%s" id))
                  (metrics
                   (gethash metrics-key mcp-server-lib-metrics--table))
-                 (indent (if multi-server "    " "  ")))
+                 (indent
+                  (if multi-server
+                      "    "
+                    "  ")))
             (insert (format "%s%s\n" indent id))
-            (insert (format "%s  Description: %s\n" indent description))
+            (insert
+             (format "%s  Description: %s\n" indent description))
             (when (plist-member tool :title)
-              (insert (format "%s  Title: %s\n" indent (plist-get tool :title))))
+              (insert
+               (format "%s  Title: %s\n"
+                       indent
+                       (plist-get tool :title))))
             (when (plist-member tool :read-only)
               (insert
-               (format "%s  Read-only: %s\n" indent
+               (format "%s  Read-only: %s\n"
+                       indent
                        (plist-get tool :read-only))))
             (insert (format "%s  Handler: %s\n" indent handler-name))
             (mcp-server-lib--insert-usage-metrics metrics indent)
@@ -292,22 +305,23 @@ Optional INDENT adds spaces before the key."
     ;; Only show Resources section if there are actual resources
     (when (and mcp-server-lib--resources
                (> (hash-table-count mcp-server-lib--resources) 0)
-               (cl-some (lambda (entry)
-                          (let ((resources-table (cdr entry)))
-                            (and resources-table
-                                 (> (hash-table-count resources-table) 0))))
-                        (mcp-server-lib--hash-table-to-sorted-alist
-                         mcp-server-lib--resources)))
+               (cl-some
+                (lambda (entry)
+                  (let ((resources-table (cdr entry)))
+                    (and resources-table
+                         (> (hash-table-count resources-table) 0))))
+                (mcp-server-lib--hash-table-to-sorted-alist
+                 mcp-server-lib--resources)))
       (insert "\nResources:\n"))
     (mcp-server-lib--with-hash-table-entries mcp-server-lib--resources
         ""
       (let* ((server-id (car entry))
              (resources-table (cdr entry))
-             (multi-server (> (hash-table-count mcp-server-lib--resources) 1)))
+             (multi-server
+              (> (hash-table-count mcp-server-lib--resources) 1)))
         (when multi-server
           (insert (format "  Server: %s\n" server-id)))
-        (mcp-server-lib--with-hash-table-entries resources-table
-            ""
+        (mcp-server-lib--with-hash-table-entries resources-table ""
           (let* ((uri (car entry))
                  (resource (cdr entry))
                  (name (plist-get resource :name))
@@ -315,11 +329,15 @@ Optional INDENT adds spaces before the key."
                  (mime-type
                   (or (plist-get resource :mime-type) "text/plain"))
                  (handler (plist-get resource :handler))
-                 (handler-name (mcp-server-lib--get-handler-name handler))
+                 (handler-name
+                  (mcp-server-lib--get-handler-name handler))
                  (metrics-key (format "resources/read:%s" uri))
                  (metrics
                   (gethash metrics-key mcp-server-lib-metrics--table))
-                 (indent (if multi-server "    " "  ")))
+                 (indent
+                  (if multi-server
+                      "    "
+                    "  ")))
             (insert (format "%s%s\n" indent uri))
             (mcp-server-lib--insert-item-properties
              name description
@@ -330,24 +348,29 @@ Optional INDENT adds spaces before the key."
             (insert "\n")))))
     ;; Only show resource templates if there are any
     (when (and mcp-server-lib--resource-templates
-               (> (hash-table-count mcp-server-lib--resource-templates) 0)
-               (cl-some (lambda (entry)
-                          (let ((templates-table (cdr entry)))
-                            (and templates-table
-                                 (> (hash-table-count templates-table) 0))))
-                        (mcp-server-lib--hash-table-to-sorted-alist
-                         mcp-server-lib--resource-templates)))
+               (> (hash-table-count
+                   mcp-server-lib--resource-templates)
+                  0)
+               (cl-some
+                (lambda (entry)
+                  (let ((templates-table (cdr entry)))
+                    (and templates-table
+                         (> (hash-table-count templates-table) 0))))
+                (mcp-server-lib--hash-table-to-sorted-alist
+                 mcp-server-lib--resource-templates)))
       (insert "\nResource Templates:\n")
       (mcp-server-lib--with-hash-table-entries
           mcp-server-lib--resource-templates
           ""
         (let* ((server-id (car entry))
                (templates-table (cdr entry))
-               (multi-server (> (hash-table-count mcp-server-lib--resource-templates) 1)))
+               (multi-server
+                (> (hash-table-count
+                    mcp-server-lib--resource-templates)
+                   1)))
           (when multi-server
             (insert (format "  Server: %s\n" server-id)))
-          (mcp-server-lib--with-hash-table-entries templates-table
-              ""
+          (mcp-server-lib--with-hash-table-entries templates-table ""
             (let* ((uri (car entry))
                    (template (cdr entry))
                    (name (plist-get template :name))
@@ -357,13 +380,17 @@ Optional INDENT adds spaces before the key."
                    (handler (plist-get template :handler))
                    (handler-name
                     (mcp-server-lib--get-handler-name handler))
-                   (indent (if multi-server "    " "  ")))
+                   (indent
+                    (if multi-server
+                        "    "
+                      "  ")))
               (insert (format "%s%s\n" indent uri))
               (mcp-server-lib--insert-item-properties
                name description
                (list :mime-type mime-type)
                indent)
-              (insert (format "%s  Handler: %s\n" indent handler-name))
+              (insert
+               (format "%s  Handler: %s\n" indent handler-name))
               (insert "\n"))))))
     (display-buffer (current-buffer))))
 
