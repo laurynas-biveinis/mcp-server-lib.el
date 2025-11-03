@@ -1,0 +1,89 @@
+#+TITLE: Contributing to mcp-server-lib.el
+
+* Release Process
+
+** Version Numbering
+
+The project follows [[https://semver.org/][Semantic Versioning]] (MAJOR.MINOR.PATCH):
+- MAJOR: Breaking API changes
+- MINOR: New features, backward compatible
+- PATCH: Bug fixes, backward compatible
+
+** Pre-Release Checklist
+
+1. [ ] All tests pass (~./check.sh~)
+2. [ ] NEWS file is up to date with all changes
+3. [ ] Version numbers are updated in:
+   - ~mcp-server-lib.el~ (Version header)
+   - ~Eask~ file (version field)
+4. [ ] Documentation reflects any new features or changes
+5. [ ] No uncommitted changes in working directory
+
+** Release Steps
+
+1. *Prepare environment*:
+   #+begin_src shell
+   # Move any ELPA installation temporarily
+   mv ~/.emacs.d/elpa/mcp-server-lib-* /tmp/
+   #+end_src
+
+2. *Update NEWS file*:
+   - Remove "(unreleased)" from the version heading
+   - Add the release date
+   - Example: ~* 0.2.0 (2025-11-03)~
+
+3. *Run final quality checks*:
+   #+begin_src shell
+   ./check.sh
+   #+end_src
+
+4. *Commit release changes*:
+   #+begin_src shell
+   git add NEWS
+   git commit -m "Release version X.Y.Z"
+   #+end_src
+
+5. *Create and push git tag*:
+   #+begin_src shell
+   git tag -a X.Y.Z -m "Release version X.Y.Z"
+   git push origin main
+   git push origin X.Y.Z
+   #+end_src
+
+6. *Create GitHub release*:
+   #+begin_src shell
+   # Extract release notes from NEWS file
+   # Create release with gh CLI
+   gh release create X.Y.Z \
+     --title "Release X.Y.Z" \
+     --notes "$(sed -n '/^\* X.Y.Z/,/^\*/p' NEWS | head -n -1)"
+   #+end_src
+
+7. *Prepare for next development cycle*:
+   - Add new section to NEWS:
+     #+begin_example
+     * X.Y+1.0 (unreleased)
+
+     ** New features
+
+     ** Bug fixes
+
+     #+end_example
+   - Commit:
+     #+begin_src shell
+     git add NEWS
+     git commit -m "Start X.Y+1.0 development"
+     git push origin main
+     #+end_src
+
+8. *Restore environment*:
+   #+begin_src shell
+   # Restore ELPA installation
+   mv /tmp/mcp-server-lib-* ~/.emacs.d/elpa/
+   #+end_src
+
+** Post-Release Verification
+
+1. Verify the tag appears on GitHub
+2. Check that MELPA picks up the new version (may take a few hours)
+3. Ensure GitHub release page shows correct release notes
