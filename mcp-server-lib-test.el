@@ -1252,6 +1252,7 @@ the reference count, returning the original tool definition."
   "Test schema generation for a handler loaded as bytecode.
 This test verifies that MCP can correctly extract parameter information
 from a function loaded from bytecode rather than interpreted elisp."
+  (require 'bytecomp)
   (let* ((source-file
           (expand-file-name
            "mcp-server-lib-bytecode-handler-test.el"))
