@@ -425,8 +425,8 @@ Optional INDENT adds spaces before the key."
         (insert
          "---------------------------------------- ------ ------- ----------\n")
         (dolist (entry
-                 (sort
-                  method-metrics #'mcp-server-lib--entry-key-lessp))
+                 (sort method-metrics
+                       #'mcp-server-lib--entry-key-lessp))
           (insert
            (mcp-server-lib--format-metrics-with-errors
             (car entry) (cdr entry))))
@@ -437,9 +437,8 @@ Optional INDENT adds spaces before the key."
         (insert "Notifications:\n")
         (insert "---------------------------------------- ------\n")
         (dolist (entry
-                 (sort
-                  notification-metrics
-                  #'mcp-server-lib--entry-key-lessp))
+                 (sort notification-metrics
+                       #'mcp-server-lib--entry-key-lessp))
           (let* ((key (car entry))
                  (metrics (cdr entry))
                  (total (mcp-server-lib-metrics-calls metrics)))
@@ -453,8 +452,8 @@ Optional INDENT adds spaces before the key."
         (insert
          "---------------------------------------- ------ ------- ----------\n")
         (dolist (entry
-                 (sort
-                  tool-metrics #'mcp-server-lib--entry-key-lessp))
+                 (sort tool-metrics
+                       #'mcp-server-lib--entry-key-lessp))
           (let* ((key (car entry))
                  (metrics (cdr entry))
                  (display-name
