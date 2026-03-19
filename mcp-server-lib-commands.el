@@ -496,9 +496,8 @@ Optional INDENT adds spaces before the key."
          (format "Tools: %d calls, %d errors (%.1f%%)\n"
                  tool-total tool-errors
                  (mcp-server-lib-metrics--error-rate
-                  tool-total tool-errors))))))
-
-  (display-buffer (current-buffer)))
+                  tool-total tool-errors)))))
+    (display-buffer (current-buffer))))
 
 (provide 'mcp-server-lib-commands)
 
