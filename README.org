@@ -30,7 +30,7 @@
 
 * Installation
 
-From MELPA or MELPA Stable:
+From [[https://melpa.org/#/mcp-server-lib][MELPA]] or [[https://stable.melpa.org/#/mcp-server-lib][MELPA Stable]]:
 
 =M-x package-install RET mcp-server-lib RET=
 
