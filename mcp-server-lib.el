@@ -1049,7 +1049,9 @@ See also: `mcp-server-lib-process-jsonrpc-parsed'"
         (response nil))
     ;; Attempt to parse the JSON
     (condition-case json-err
-        (setq json-object (json-read-from-string json-string))
+        (setq json-object
+              (json-read-from-string
+               (decode-coding-string json-string 'utf-8 t)))
       (json-error
        ;; If JSON parsing fails, create a parse error response
        (setq response

@@ -2,9 +2,20 @@ mcp-server-lib.el NEWS -- history of user-visible changes
 
 * Changes in mcp-server-lib 0.3.0 (unreleased)
 
-** New features
+** New Features
 
-** Bug fixes
+** Bug Fixes
+
+* Changes in mcp-server-lib 0.2.1 (unreleased)
+
+** Bug Fixes
+
+*** Fixed non-ASCII tool parameters arriving as unibyte strings
+    When tool parameters containing non-ASCII characters (e.g. UTF-8) were
+    received via the stdio transport, base64 decoding produced unibyte strings.
+    This caused string= comparisons against multibyte Emacs strings to fail.
+    The library now decodes incoming JSON strings to multibyte before parsing,
+    fixing non-ASCII parameter handling for all transports.
 
 * Changes in mcp-server-lib 0.2.0 (2025-11-03)
 

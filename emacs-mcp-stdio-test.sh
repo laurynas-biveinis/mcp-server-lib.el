@@ -427,6 +427,43 @@ emacsclient -s "$TEST_SERVER_NAME" -e "
 rm -f stdio-s1.txt stdio-s2.txt
 TESTS_RUN=$((TESTS_RUN + 1))
 
+TEST_CASE="Test case 8: Non-ASCII tool parameter via stdio"
+
+# Register a tool that checks string= on a non-ASCII parameter
+emacsclient -s "$TEST_SERVER_NAME" -e "
+(progn
+  (defun mcp-test--multibyte-check (input-string)
+    \"Check INPUT-STRING against multibyte literal.
+
+MCP Parameters:
+  input-string - string to compare\"
+    (if (string= input-string \"ąčę\")
+        \"multibyte-match\"
+      (format \"mismatch: %s\" input-string)))
+
+  (mcp-server-lib-register-tool #'mcp-test--multibyte-check
+    :id \"test-multibyte-check\"
+    :description \"Checks non-ASCII parameter\"))
+" >/dev/null
+
+INIT='{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}},"id":1}'
+NOTIF='{"jsonrpc":"2.0","method":"notifications/initialized"}'
+CALL='{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"test-multibyte-check","arguments":{"input-string":"ąčę"}}}'
+
+printf "%s\n%s\n%s\n" "$INIT" "$NOTIF" "$CALL" | $STDIO_CMD >stdio-multibyte.txt
+
+if ! grep -q '"multibyte-match"' stdio-multibyte.txt; then
+	echo "$TEST_CASE"
+	echo "FAIL: Expected multibyte-match in response"
+	cat stdio-multibyte.txt
+	exit 1
+fi
+
+# Cleanup
+emacsclient -s "$TEST_SERVER_NAME" -e '(mcp-server-lib-unregister-tool "test-multibyte-check")' >/dev/null
+rm -f stdio-multibyte.txt
+TESTS_RUN=$((TESTS_RUN + 1))
+
 # Stop the MCP server at the end
 run_emacs_function "mcp-server-lib-stop" "Failed to stop MCP at end"
 
