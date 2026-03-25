@@ -424,6 +424,7 @@ To install the script to a different location:
 
 - https://github.com/utsahi/mcp-server.el
 - https://github.com/rhblind/emacs-mcp-server
+- https://codeberg.org/jlouisbiz/rcd-mcp-emacs-documentation
 
 * License
 
