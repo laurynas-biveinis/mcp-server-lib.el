@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # emacs-mcp-stdio.sh - Connect to Emacs MCP server via stdio transport
 #
 # Copyright (C) 2025 Laurynas Biveinis

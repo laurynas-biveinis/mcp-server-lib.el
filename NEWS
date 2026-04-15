@@ -10,6 +10,13 @@ mcp-server-lib.el NEWS -- history of user-visible changes
 
 ** Bug Fixes
 
+*** Use portable shebang in emacs-mcp-stdio.sh
+    Changed the shebang from ~#!/bin/bash~ to ~#!/usr/bin/env bash~ so the
+    stdio shim runs on systems where bash is not installed at ~/bin/bash~
+    (NixOS, Alpine, some BSDs, minimal containers). All platforms that
+    previously worked continue to work since ~/usr/bin/env~ is a POSIX
+    standard location.
+
 *** Fixed non-ASCII tool parameters arriving as unibyte strings
     When tool parameters containing non-ASCII characters (e.g. UTF-8) were
     received via the stdio transport, base64 decoding produced unibyte strings.
