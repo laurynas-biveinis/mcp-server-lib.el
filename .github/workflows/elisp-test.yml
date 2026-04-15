@@ -72,7 +72,16 @@ jobs:
 
       - name: Test Report
         uses: dorny/test-reporter@v1 # zizmor: ignore[unpinned-uses,ref-confusion]
-        if: matrix.emacs_version != '27.2' && matrix.emacs_version != '28.2'
+        # Fork PRs cannot create check runs: GitHub withholds `checks: write`
+        # from GITHUB_TOKEN on pull_request events from forks, so the
+        # test-reporter API call 403s. Skip the step on fork PRs; tests and
+        # artifact upload still run. Same-repo PRs, push, and workflow_dispatch
+        # keep full reporting.
+        if: >-
+          matrix.emacs_version != '27.2'
+          && matrix.emacs_version != '28.2'
+          && (github.event_name != 'pull_request'
+              || github.event.pull_request.head.repo.full_name == github.repository)
         with:
           name: Test Results - ${{ matrix.os }} - Emacs ${{ matrix.emacs_version }}
           path: mcp-server-lib-test.xml
