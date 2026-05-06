@@ -71,7 +71,7 @@ jobs:
           retention-days: 7
 
       - name: Test Report
-        uses: dorny/test-reporter@v1 # zizmor: ignore[unpinned-uses,ref-confusion]
+        uses: dorny/test-reporter@v3 # zizmor: ignore[unpinned-uses,ref-confusion]
         # Fork PRs cannot create check runs: GitHub withholds `checks: write`
         # from GITHUB_TOKEN on pull_request events from forks, so the
         # test-reporter API call 403s. Skip the step on fork PRs; tests and
