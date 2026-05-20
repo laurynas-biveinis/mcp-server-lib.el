@@ -705,6 +705,25 @@ then verifies that both calls and errors increased by 1 at both levels."
     (should (arrayp result))
     result))
 
+(defun mcp-server-lib-test--tool-name (tool)
+  "Return the value of the `name' field in a TOOL alist."
+  (alist-get 'name tool))
+
+(defun mcp-server-lib-test--verify-list-counts
+    (server-id tools resources templates)
+  "Verify SERVER-ID's list endpoints return TOOLS, RESOURCES, TEMPLATES entries.
+Sends tools/list, resources/list, and resources/templates/list requests
+against SERVER-ID and asserts each response length matches the
+corresponding expected count."
+  (let ((mcp-server-lib-ert-server-id server-id))
+    (should (= tools (length (mcp-server-lib-test--get-tool-list))))
+    (should
+     (= resources (length (mcp-server-lib-ert-get-resource-list))))
+    (should
+     (=
+      templates
+      (length (mcp-server-lib-ert-get-resource-templates-list))))))
+
 (defun mcp-server-lib-test--verify-single-tool-param-desc
     (param-name expected-type expected-desc-regex)
   "Verify parameter type and description for a single tool.
@@ -1326,6 +1345,225 @@ from a function loaded from bytecode rather than interpreted elisp."
     ;; Verify tool is still registered in server-a
     (let ((mcp-server-lib-ert-server-id "server-a"))
       (should (= 1 (length (mcp-server-lib-test--get-tool-list))))))))
+
+;;; `mcp-server-lib-unregister-server' tests
+
+(ert-deftest mcp-server-lib-test-unregister-server-basic ()
+  "Test bulk unregister removes tool, resource, and template for a server-id."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "test-tool"
+         :description "Test tool"
+         :server-id "server-a")
+        (mcp-server-lib-register-resource
+         "test://static"
+         #'mcp-server-lib-test--return-string
+         :name "Static"
+         :server-id "server-a")
+        (mcp-server-lib-register-resource
+         "test://{var}"
+         #'mcp-server-lib-test--return-string
+         :name "Template"
+         :server-id "server-a")
+        (mcp-server-lib-test--with-servers
+            '(("server-a" :tools t :resources t))
+          (mcp-server-lib-test--verify-list-counts "server-a" 1 1 1)
+          (mcp-server-lib-unregister-server "server-a")
+          (mcp-server-lib-test--verify-list-counts "server-a" 0 0 0)))
+    (mcp-server-lib-unregister-server "server-a")))
+
+(ert-deftest mcp-server-lib-test-unregister-server-cross-server-isolation
+    ()
+  "Test bulk unregister leaves other server-ids' registrations intact."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "tool-a"
+         :description "Tool A"
+         :server-id "server-a")
+        (mcp-server-lib-register-resource
+         "test://a/static"
+         #'mcp-server-lib-test--return-string
+         :name "Resource A"
+         :server-id "server-a")
+        (mcp-server-lib-register-resource
+         "test://a/{var}"
+         #'mcp-server-lib-test--return-string
+         :name "Template A"
+         :server-id "server-a")
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "tool-b"
+         :description "Tool B"
+         :server-id "server-b")
+        (mcp-server-lib-register-resource
+         "test://b/static"
+         #'mcp-server-lib-test--return-string
+         :name "Resource B"
+         :server-id "server-b")
+        (mcp-server-lib-register-resource
+         "test://b/{var}"
+         #'mcp-server-lib-test--return-string
+         :name "Template B"
+         :server-id "server-b")
+        (mcp-server-lib-test--with-servers
+            '(("server-a" :tools t :resources t)
+              ("server-b" :tools t :resources t))
+          (mcp-server-lib-unregister-server "server-a")
+          (mcp-server-lib-test--verify-list-counts "server-a" 0 0 0)
+          (mcp-server-lib-test--verify-list-counts "server-b" 1 1 1)))
+    (mcp-server-lib-unregister-server "server-a")
+    (mcp-server-lib-unregister-server "server-b")))
+
+(ert-deftest mcp-server-lib-test-unregister-server-ref-count ()
+  "Test bulk unregister decrements ref-count once per call.
+Registering the same tool twice produces ref-count 2; one bulk-unregister
+leaves ref-count 1 (tool still listed); a second call removes it."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "shared-tool"
+         :description "Shared tool"
+         :server-id "ref-count-test")
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "shared-tool"
+         :description "Shared tool"
+         :server-id "ref-count-test")
+        (mcp-server-lib-test--with-servers
+            '(("ref-count-test" :tools t :resources nil))
+          (let ((mcp-server-lib-ert-server-id "ref-count-test"))
+            (should (= 1 (length (mcp-server-lib-test--get-tool-list))))
+            (mcp-server-lib-unregister-server "ref-count-test")
+            (should (= 1 (length (mcp-server-lib-test--get-tool-list))))
+            (mcp-server-lib-unregister-server "ref-count-test")
+            (should
+             (= 0 (length (mcp-server-lib-test--get-tool-list)))))))
+    (mcp-server-lib-unregister-server "ref-count-test")
+    (mcp-server-lib-unregister-server "ref-count-test")))
+
+(ert-deftest mcp-server-lib-test-unregister-server-ref-count-per-key ()
+  "Test bulk unregister decrements each key independently.
+Tool A with ref-count 1 and tool B with ref-count 2 (registered twice)
+under the same server-id: one bulk-unregister removes A (was 1) and
+leaves B with ref-count 1; a second call removes B."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "tool-a"
+         :description "Tool A"
+         :server-id "mixed-ref")
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "tool-b"
+         :description "Tool B"
+         :server-id "mixed-ref")
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "tool-b"
+         :description "Tool B"
+         :server-id "mixed-ref")
+        (mcp-server-lib-test--with-servers
+            '(("mixed-ref" :tools t :resources nil))
+          (let ((mcp-server-lib-ert-server-id "mixed-ref"))
+            (should (= 2 (length (mcp-server-lib-test--get-tool-list))))
+            (mcp-server-lib-unregister-server "mixed-ref")
+            (let ((tool-names
+                   (mapcar
+                    #'mcp-server-lib-test--tool-name
+                    (mcp-server-lib-test--get-tool-list))))
+              (should (equal '("tool-b") tool-names)))
+            (mcp-server-lib-unregister-server "mixed-ref")
+            (should
+             (= 0 (length (mcp-server-lib-test--get-tool-list)))))))
+    (mcp-server-lib-unregister-server "mixed-ref")
+    (mcp-server-lib-unregister-server "mixed-ref")))
+
+(ert-deftest mcp-server-lib-test-unregister-server-ref-count-resource ()
+  "Test bulk unregister decrements ref-count for resources and templates.
+Registering the same resource URI twice and the same template URI twice
+produces ref-count 2 each; one bulk-unregister leaves both with
+ref-count 1 (still listed); a second call removes them."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-resource
+         "test://resource-shared"
+         #'mcp-server-lib-test--return-string
+         :name "Shared Resource"
+         :server-id "ref-count-resources")
+        (mcp-server-lib-register-resource
+         "test://resource-shared"
+         #'mcp-server-lib-test--return-string
+         :name "Shared Resource"
+         :server-id "ref-count-resources")
+        (mcp-server-lib-register-resource
+         "test://template-shared/{var}"
+         #'mcp-server-lib-test--return-string
+         :name "Shared Template"
+         :server-id "ref-count-resources")
+        (mcp-server-lib-register-resource
+         "test://template-shared/{var}"
+         #'mcp-server-lib-test--return-string
+         :name "Shared Template"
+         :server-id "ref-count-resources")
+        (mcp-server-lib-test--with-servers
+            '(("ref-count-resources" :tools nil :resources t))
+          (mcp-server-lib-test--verify-list-counts
+           "ref-count-resources" 0 1 1)
+          (mcp-server-lib-unregister-server "ref-count-resources")
+          (mcp-server-lib-test--verify-list-counts
+           "ref-count-resources" 0 1 1)
+          (mcp-server-lib-unregister-server "ref-count-resources")
+          (mcp-server-lib-test--verify-list-counts
+           "ref-count-resources" 0 0 0)))
+    (mcp-server-lib-unregister-server "ref-count-resources")
+    (mcp-server-lib-unregister-server "ref-count-resources")))
+
+(ert-deftest mcp-server-lib-test-unregister-server-mixed ()
+  "Test bulk unregister handles multiple entries across all three types."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "mixed-tool-1"
+         :description "Tool 1"
+         :server-id "mixed-server")
+        (mcp-server-lib-register-tool
+         #'mcp-server-lib-test--return-string
+         :id "mixed-tool-2"
+         :description "Tool 2"
+         :server-id "mixed-server")
+        (mcp-server-lib-register-resource
+         "test://mixed/r1"
+         #'mcp-server-lib-test--return-string
+         :name "Resource 1"
+         :server-id "mixed-server")
+        (mcp-server-lib-register-resource
+         "test://mixed/r2"
+         #'mcp-server-lib-test--return-string
+         :name "Resource 2"
+         :server-id "mixed-server")
+        (mcp-server-lib-register-resource
+         "test://mixed/{v1}"
+         #'mcp-server-lib-test--return-string
+         :name "Template 1"
+         :server-id "mixed-server")
+        (mcp-server-lib-register-resource
+         "test://mixed/other/{v2}"
+         #'mcp-server-lib-test--return-string
+         :name "Template 2"
+         :server-id "mixed-server")
+        (mcp-server-lib-test--with-servers
+            '(("mixed-server" :tools t :resources t))
+          (mcp-server-lib-test--verify-list-counts "mixed-server" 2 2 2)
+          (mcp-server-lib-unregister-server "mixed-server")
+          (mcp-server-lib-test--verify-list-counts "mixed-server" 0 0 0)))
+    (mcp-server-lib-unregister-server "mixed-server")))
 
 ;;; Notification tests
 

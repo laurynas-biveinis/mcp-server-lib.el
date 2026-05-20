@@ -261,7 +261,18 @@ Literal segments in templates must match exactly - =test://items/{id}= will matc
 
 The implementation uses non-greedy (first-match) behavior when matching variables. For example, =test://{name}.txt= matching =test://file.config.txt= extracts =name="file.config"=, not =name="file.config.txt"=.
 
-To unregister any resource (static or templated):
+*** Unregistration
+
+To tear down everything a package registered with a given =:server-id= (for example, in a =-disable= function), call =mcp-server-lib-unregister-server= once instead of mirroring each registration with an individual unregister call. This is the preferred teardown pattern for packages built on =mcp-server-lib= — it removes the need to keep register and unregister code in sync as your tool set grows.
+
+#+begin_src elisp
+(defun my-mcp-disable ()
+  (mcp-server-lib-unregister-server "my-server"))
+#+end_src
+
+The function decrements each registered entry's reference count exactly once. Entries whose count was one are fully removed; entries with a higher count (e.g. from nested test fixtures) remain with the count reduced. Calling =mcp-server-lib-unregister-server= on an unknown server-id is a silent no-op. Pass ="default"= explicitly to operate on the default server.
+
+To unregister a single resource (static or templated):
 
 #+begin_src elisp
 (mcp-server-lib-unregister-resource "org://{filename}" :server-id "my-server")

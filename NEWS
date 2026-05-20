@@ -4,6 +4,13 @@ mcp-server-lib.el NEWS -- history of user-visible changes
 
 ** New Features
 
+*** Bulk unregistration of all server entries
+    The new function mcp-server-lib-unregister-server unregisters every tool,
+    resource, and resource template registered under a given server-id in a
+    single call:
+
+    (mcp-server-lib-unregister-server "my-server")
+
 ** Bug Fixes
 
 * Changes in mcp-server-lib 0.2.1 (unreleased)

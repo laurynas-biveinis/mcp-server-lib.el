@@ -48,6 +48,7 @@
 ;;; Code:
 
 (require 'json)
+(require 'subr-x)
 (require 'mcp-server-lib-metrics)
 
 ;;; Customization variables
@@ -1477,6 +1478,52 @@ MESSAGE is the error message string.
 This function does not return - it signals an error condition that
 will be caught by the resource handler infrastructure."
   (signal 'mcp-server-lib-resource-error (list code message)))
+
+;;; API - Bulk unregister
+
+(defun mcp-server-lib--bulk-unregister-table (server-id outer-table)
+  "Decrement ref-count of every entry in OUTER-TABLE under SERVER-ID.
+OUTER-TABLE is one of `mcp-server-lib--tools',
+`mcp-server-lib--resources', or `mcp-server-lib--resource-templates'.
+If SERVER-ID has no inner table, does nothing.
+
+Keys are snapshotted before iteration so that
+`mcp-server-lib--ref-counted-unregister' is free to `remhash' entries as
+it iterates."
+  (when-let* ((inner-table (gethash server-id outer-table)))
+    (dolist (key (hash-table-keys inner-table))
+      (mcp-server-lib--ref-counted-unregister key inner-table))))
+
+(defun mcp-server-lib-unregister-server (server-id)
+  "Bulk-unregister every tool, resource, and template for SERVER-ID.
+
+SERVER-ID is the server identifier string (required; pass \"default\"
+explicitly to operate on the default server).
+
+Each registered key under SERVER-ID has its reference count decremented
+exactly once.  Entries whose reference count was 1 are fully removed;
+entries whose count was greater than 1 remain registered with the count
+decremented.  This preserves the ref-count contract used by nested
+register/unregister scopes (e.g. in test fixtures).
+
+Calling this function on an unknown SERVER-ID is a silent no-op.
+
+Returns nil.
+
+Example:
+  (defun my-mcp-disable ()
+    (mcp-server-lib-unregister-server \"my-server\"))
+
+See also:
+  `mcp-server-lib-unregister-tool'
+  `mcp-server-lib-unregister-resource'"
+  (mcp-server-lib--bulk-unregister-table
+   server-id mcp-server-lib--tools)
+  (mcp-server-lib--bulk-unregister-table
+   server-id mcp-server-lib--resources)
+  (mcp-server-lib--bulk-unregister-table
+   server-id mcp-server-lib--resource-templates)
+  nil)
 
 (provide 'mcp-server-lib)
 ;;; mcp-server-lib.el ends here
