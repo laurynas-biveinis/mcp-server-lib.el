@@ -49,10 +49,9 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     usage statistics.
 
 *** Multi-parameter tool support
-    Tools can now accept multiple parameters. The library automatically maps
-    JSON object fields to function parameters using camelCase to kebab-case
-    conversion. Parameters are validated - missing required parameters or
-    unexpected parameters will return appropriate JSON-RPC errors.
+    Tools can now accept multiple parameters. Parameters are validated -
+    missing required parameters or unexpected parameters will return
+    appropriate JSON-RPC errors.
 
 *** Optional parameter support
     Tool schemas and invocation now correctly handle Elisp &optional parameters.
