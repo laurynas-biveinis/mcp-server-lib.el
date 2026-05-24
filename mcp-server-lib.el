@@ -1,10 +1,10 @@
 ;;; mcp-server-lib.el --- Model Context Protocol server library -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 Laurynas Biveinis
+;; Copyright (C) 2025-2026 Laurynas Biveinis
 
 ;; Author: Laurynas Biveinis <laurynas.biveinis@gmail.com>
 ;; Keywords: comm, tools
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; URL: https://github.com/laurynas-biveinis/mcp-server-lib.el
 
@@ -47,6 +47,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'json)
 (require 'subr-x)
 (require 'mcp-server-lib-metrics)
@@ -93,6 +94,14 @@ Defaults to `user-emacs-directory' but can be customized."
 
 (defconst mcp-server-lib-jsonrpc-error-internal -32603
   "JSON-RPC 2.0 Internal Error code.")
+
+;;; Public API - Error conditions
+
+;; Inherits from `user-error' so that handler-side tool errors don't
+;; trip `debug-on-error' in interactive sessions.
+(define-error 'mcp-server-lib-tool-error "MCP tool error" 'user-error)
+(define-error 'mcp-server-lib-resource-error "MCP resource error")
+(define-error 'mcp-server-lib-invalid-params "MCP invalid parameters")
 
 ;;; Internal Constants
 
@@ -142,7 +151,20 @@ Keys are server-id strings, values are hash tables of URI to resource-data.")
 (defvar mcp-server-lib--resource-templates
   (make-hash-table :test 'equal)
   "Hash table of registered MCP resource templates by server.
-Keys are server-id strings, values are hash tables of template to template-data.")
+Keys are server-id strings, values are hash tables of template
+to template-data.")
+
+;; Convert to `cl-defstruct' if another field gets added.
+(defvar mcp-server-lib--servers (make-hash-table :test 'equal)
+  "Hash table of registered MCP server records keyed by server-id.
+Values are plists with per-server metadata.  Required key `:ref-count'
+tracks how many `mcp-server-lib-register-server' calls are live for the
+server-id; the record is removed when this reaches zero.  Optional key
+`:instructions' holds a string emitted in the `initialize' response.
+The obsolete `mcp-server-lib-register-tool' and
+`mcp-server-lib-register-resource' shims do not populate this table;
+`mcp-server-lib--all-server-ids' (in mcp-server-lib-commands.el)
+discovers those server-ids from the per-kind tables instead.")
 
 ;;; Core helpers
 
@@ -235,7 +257,8 @@ doesn't match function arguments, or if any parameter is not documented."
            docstring)
         (let
             ((params-text (match-string 1 docstring))
-             ;; Match param definitions: spaces (min-max), name, whitespace, hyphen
+             ;; Match param definitions:
+             ;; spaces (min-max), name, whitespace, hyphen
              (param-regex
               (format
                "^[ ]\\{%d,%d\\}\\([^ \t\n\r]+\\)[ \t]*-[ \t]*\\(.*\\)$"
@@ -342,35 +365,52 @@ Extracts parameter descriptions from the docstring if available."
         ;; No arguments case
         '((type . "object"))))))
 
-(defun mcp-server-lib--ref-counted-register (key item table)
-  "Register ITEM with KEY in TABLE with reference counting.
-If KEY already exists, increment its reference count.
-Otherwise, add ITEM to TABLE with :ref-count 1.
-Returns nil."
-  (if-let* ((existing (gethash key table)))
-    ;; Item already exists - increment ref count
-    (let ((ref-count (or (plist-get existing :ref-count) 1)))
-      (plist-put existing :ref-count (1+ ref-count)))
-    ;; New item - ensure it has ref-count = 1
-    (plist-put item :ref-count 1)
-    (puthash key item table))
+(defun mcp-server-lib--bump-ref-count (existing)
+  "Increment the `:ref-count' of EXISTING entry in place.
+EXISTING must be a non-empty plist with `:ref-count' set; both
+preconditions are enforced by `cl-assert'.  `plist-put' mutates
+non-empty plists in place (via `setcdr' on the last cons when the
+key is absent), so the bump is visible through any reference held
+by callers, including the hash table that owns EXISTING."
+  (cl-assert existing)
+  (let ((ref-count (plist-get existing :ref-count)))
+    (cl-assert ref-count)
+    (plist-put existing :ref-count (1+ ref-count))
+    nil))
+
+(defun mcp-server-lib--register-new (key item table)
+  "Insert ITEM under KEY in TABLE with `:ref-count' set to 1.
+ITEM must be a non-empty plist; KEY must not be already present in
+TABLE; both preconditions are enforced by `cl-assert'."
+  (cl-assert item)
+  (cl-assert (null (gethash key table)))
+  (puthash key (plist-put item :ref-count 1) table)
   nil)
 
+(defun mcp-server-lib--register-or-bump (key entry table)
+  "Insert ENTRY under KEY in TABLE, or bump the existing entry's ref-count.
+ENTRY is consumed only when KEY is absent from TABLE; otherwise the
+existing entry's `:ref-count' is incremented in place."
+  (if-let* ((existing (gethash key table)))
+      (mcp-server-lib--bump-ref-count existing)
+    (mcp-server-lib--register-new key entry table)))
+
 (defun mcp-server-lib--ref-counted-unregister (key table)
-  "Unregister item with KEY from TABLE using reference counting.
-If reference count > 1, decrement it.
-Otherwise, remove the item from TABLE.
-Returns t if item was found, nil otherwise."
-  (if-let* ((item (gethash key table))
-            (ref-count (or (plist-get item :ref-count) 1)))
-    (if (> ref-count 1)
-        ;; Decrement ref count
-        (progn
+  "Decrement KEY's `:ref-count' in TABLE or remove the entry.
+If KEY is present with `:ref-count' greater than 1, decrement it.
+If KEY is present with `:ref-count' 1, remove the entry from TABLE.
+Any entry present under KEY must have `:ref-count' set; enforced by
+`cl-assert'.
+Returns t if KEY was found (its reference count was decremented, or
+the entry was removed when the count reached zero); nil if KEY was
+absent."
+  (when-let* ((item (gethash key table)))
+    (let ((ref-count (plist-get item :ref-count)))
+      (cl-assert ref-count)
+      (if (> ref-count 1)
           (plist-put item :ref-count (1- ref-count))
-          t)
-      ;; Last reference - remove the item
-      (remhash key table)
-      t)))
+        (remhash key table)))
+    t))
 
 (defun mcp-server-lib--jsonrpc-error (id code message)
   "Create a JSON-RPC error response with ID, error CODE and MESSAGE."
@@ -400,6 +440,42 @@ and mimeType only if mime-type-var is non-nil."
         (when value
           (push (cons key value) additions))))
     (append alist additions)))
+
+(defun mcp-server-lib--plist-remove (plist key)
+  "Return a copy of PLIST with KEY (and its value) removed.
+PLIST is not modified.  Order of remaining entries is preserved."
+  (let (result)
+    (while plist
+      (if (eq (car plist) key)
+          (setq plist (cddr plist))
+        (push (car plist) result)
+        (push (cadr plist) result)
+        (setq plist (cddr plist))))
+    (nreverse result)))
+
+(defun mcp-server-lib--validate-property-keys
+    (properties allowed entity)
+  "Signal an error if PROPERTIES contain a key outside ALLOWED.
+ENTITY is a string prefix used in the error message (e.g. \"Tool spec\"
+or \"Server registration\").  PROPERTIES must be a proper, even-length
+plist; improper (dotted) or odd-length lists signal an error \(catches
+typos like a trailing key with no value, or a dotted property tail).
+Duplicate keys are also rejected (catches typos like a property
+re-added without removing the old one)."
+  (if-let* ((len (proper-list-p properties)))
+      (unless (zerop (mod len 2))
+        (error "%s: property list has odd length" entity))
+    (error "%s: property list must be a proper list" entity))
+  (let ((p properties)
+        seen)
+    (while p
+      (let ((key (car p)))
+        (unless (memq key allowed)
+          (error "%s: unknown property %S" entity key))
+        (when (memq key seen)
+          (error "%s: duplicate property %S" entity key))
+        (push key seen))
+      (setq p (cddr p)))))
 
 (defun mcp-server-lib--respond-with-result
     (request-context result-data)
@@ -512,7 +588,212 @@ Returns a JSON-RPC formatted response string, or nil for notifications."
       (mcp-server-lib--dispatch-jsonrpc-method
        id method params server-id)))))
 
+;;; Internal Tool helpers
+
+(defun mcp-server-lib--build-tool-entry (spec)
+  "Validate SPEC and build a tool registry entry from it.
+SPEC is a list whose car is the handler function and whose cdr is a
+property list with required :id and :description and optional :title
+and :read-only.  SPEC must not include :server-id; the server-id is
+supplied separately by the caller.
+
+Returns a cons cell (ID . ENTRY), where ID is the tool's :id and
+ENTRY is the plist to register under that id.  Signals an error on
+bad input; in that case nothing has been mutated."
+  (unless (consp spec)
+    (error "Tool spec must be a non-empty list"))
+  (let ((handler (car spec))
+        (properties (cdr spec)))
+    (unless (functionp handler)
+      (error "Tool registration requires handler function"))
+    (mcp-server-lib--validate-property-keys
+     properties '(:id :description :title :read-only) "Tool spec")
+    (let ((id (plist-get properties :id))
+          (description (plist-get properties :description))
+          (title (plist-get properties :title)))
+      (unless id
+        (error "Tool registration requires :id property"))
+      (unless (stringp id)
+        (error "Tool :id must be a string"))
+      (unless description
+        (error "Tool registration requires :description property"))
+      (unless (stringp description)
+        (error "Tool :description must be a string"))
+      (when (and title (not (stringp title)))
+        (error "Tool :title must be a string"))
+      (when (and (plist-member properties :read-only)
+                 (not (booleanp (plist-get properties :read-only))))
+        (error "Tool :read-only must be a boolean"))
+      (let ((entry
+             (list
+              :description description
+              :handler handler
+              :schema
+              (mcp-server-lib--generate-schema-from-function
+               handler))))
+        (when title
+          (setq entry (plist-put entry :title title)))
+        ;; Always include :read-only if it was specified, even if nil
+        (when (plist-member properties :read-only)
+          (setq entry
+                (plist-put
+                 entry
+                 :read-only (plist-get properties :read-only))))
+        (cons id entry)))))
+
+(defun mcp-server-lib--apply-tool-entry (id entry server-id)
+  "Register pre-built ENTRY under ID and SERVER-ID.
+ENTRY must be a tool plist produced by
+`mcp-server-lib--build-tool-entry'.  If ID is already registered
+under SERVER-ID, increments its reference count and ENTRY is
+discarded.  Otherwise inserts ENTRY fresh."
+  (mcp-server-lib--register-or-bump
+   id entry (mcp-server-lib--get-server-tools server-id)))
+
+;;; Internal Resource helpers
+
+(defun mcp-server-lib--build-resource-entry (spec)
+  "Validate resource SPEC and build a registry entry from it.
+SPEC is a list `(URI HANDLER . PROPERTIES)' where PROPERTIES is a plist
+with required :name and optional :description, :mime-type.  SPEC must
+not include :server-id; the server-id is supplied separately.
+
+Returns a cons cell (URI . ENTRY), where ENTRY is the plist to register
+under URI.  For template URIs (containing `{var}'), ENTRY includes the
+parsed-template structure under `:parsed'.  Signals an error on bad
+input; in that case nothing has been mutated."
+  (unless (and (consp spec) (consp (cdr spec)))
+    (error
+     "Resource spec must be a list of (URI HANDLER . PROPERTIES)"))
+  (let ((uri (car spec))
+        (handler (cadr spec))
+        (properties (cddr spec)))
+    (unless (stringp uri)
+      (error "Resource URI must be a string"))
+    (unless (string-match-p mcp-server-lib--uri-with-scheme-regex uri)
+      (error
+       "Resource URI must have format 'scheme://path': '%s'" uri))
+    (when (and (string-match-p "}" uri)
+               (not (string-match-p "{" uri)))
+      (error "Unmatched '}' in resource URI: %s" uri))
+    (unless (functionp handler)
+      (error "Resource registration requires handler function"))
+    (mcp-server-lib--validate-property-keys
+     properties
+     '(:name :description :mime-type) "Resource spec")
+    (let ((name (plist-get properties :name))
+          (description (plist-get properties :description))
+          (mime-type (plist-get properties :mime-type)))
+      (unless name
+        (error "Resource registration requires :name property"))
+      (unless (stringp name)
+        (error "Resource :name must be a string"))
+      (when (and description (not (stringp description)))
+        (error "Resource :description must be a string"))
+      (when (and mime-type (not (stringp mime-type)))
+        (error "Resource :mime-type must be a string"))
+      (let ((entry (list :handler handler :name name)))
+        (when (string-match-p "{" uri)
+          (setq entry
+                (plist-put
+                 entry
+                 :parsed (mcp-server-lib--parse-uri-template uri))))
+        (when description
+          (setq entry (plist-put entry :description description)))
+        (when mime-type
+          (setq entry (plist-put entry :mime-type mime-type)))
+        (cons uri entry)))))
+
+(defun mcp-server-lib--apply-resource-entry (uri entry server-id)
+  "Register pre-built ENTRY under URI and SERVER-ID.
+ENTRY must be a resource plist produced by
+`mcp-server-lib--build-resource-entry'.  The presence of `:parsed' in
+ENTRY selects the templates registry; its absence selects the static
+resources registry.
+
+If URI is already registered under SERVER-ID, increments its reference
+count and ENTRY is discarded.  Otherwise inserts ENTRY fresh."
+  (let ((hash-table
+         (if (plist-get entry :parsed)
+             (mcp-server-lib--get-server-templates server-id)
+           (mcp-server-lib--get-server-resources server-id))))
+    (mcp-server-lib--register-or-bump uri entry hash-table)))
+
 ;;; Resource Template Support
+
+(defun mcp-server-lib--parse-uri-template (template)
+  "Parse URI TEMPLATE into segments.
+Returns plist with :segments, :variables, and :pattern.
+Supports RFC 6570 simple variables {var} and reserved expansion {+var}."
+  ;; First check for balanced braces
+  (let ((open-count 0)
+        (close-count 0)
+        (i 0))
+    (while (< i (length template))
+      (cond
+       ((eq (aref template i) ?{)
+        (setq open-count (1+ open-count)))
+       ((eq (aref template i) ?})
+        (setq close-count (1+ close-count))))
+      (setq i (1+ i)))
+    ;; Check for balanced braces after processing entire string
+    (unless (= open-count close-count)
+      (error "Unbalanced braces in resource template: %s" template)))
+
+  (let ((segments '())
+        (variables '())
+        (pos 0)
+        (len (length template)))
+    ;; Process template character by character
+    (while (< pos len)
+      (if-let* ((var-start (string-match "{" template pos)))
+          ;; Found variable start
+          (progn
+            ;; Add literal segment before variable if any
+            (when (> var-start pos)
+              (push (list
+                     :type 'literal
+                     :value (substring template pos var-start))
+                    segments))
+            ;; Find variable end (guaranteed to exist due to balance check)
+            (let* ((var-end (string-match "}" template var-start))
+                   ;; Extract variable content
+                   (var-content
+                    (substring template (1+ var-start) var-end))
+                   (reserved
+                    (and (> (length var-content) 0)
+                         (eq (aref var-content 0) ?+)))
+                   (var-name
+                    (if reserved
+                        (substring var-content 1)
+                      var-content)))
+              ;; Validate variable name
+              ;; RFC 6570: Variable names must start with ALPHA / "_"
+              ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
+              (unless (string-match-p
+                       "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
+                (error
+                 "Invalid variable name '%s' in resource template: %s"
+                 var-name
+                 template))
+              ;; Add variable segment
+              (push (list
+                     :type 'variable
+                     :name var-name
+                     :reserved reserved)
+                    segments)
+              (push var-name variables)
+              (setq pos (1+ var-end))))
+        ;; No more variables, add remaining literal
+        (when (< pos len)
+          (push (list :type 'literal :value (substring template pos))
+                segments))
+        (setq pos len)))
+    ;; Return parsed structure
+    (list
+     :segments (nreverse segments)
+     :variables (nreverse variables)
+     :pattern template)))
 
 (defun mcp-server-lib--match-uri-template (uri parsed-template)
   "Match URI against PARSED-TEMPLATE.
@@ -663,10 +944,11 @@ METHOD-METRICS is used to track errors."
 METHOD-METRICS is used to track errors for this method."
   (let* ((uri (alist-get 'uri params))
          (resources-table
-          (mcp-server-lib--get-server-resources server-id))
+          (gethash server-id mcp-server-lib--resources))
          (templates-table
-          (mcp-server-lib--get-server-templates server-id))
-         (resource (gethash uri resources-table))
+          (gethash server-id mcp-server-lib--resource-templates))
+         (resource
+          (and resources-table (gethash uri resources-table)))
          (template-match
           (unless resource
             (mcp-server-lib--find-matching-template
@@ -731,27 +1013,33 @@ Returns a JSON-RPC response string for the request."
   "Handle initialize request with ID for SERVER-ID.
 This implements the MCP initialize handshake, which negotiates protocol
 version and capabilities between the client and server."
-  (let ((capabilities '()))
-    (let ((tools-table (gethash server-id mcp-server-lib--tools))
-          (resources-table
-           (gethash server-id mcp-server-lib--resources))
-          (templates-table
-           (gethash server-id mcp-server-lib--resource-templates)))
-      (when (and tools-table (> (hash-table-count tools-table) 0))
-        (push `(tools . ,(make-hash-table)) capabilities))
-      (when (or (and resources-table
-                     (> (hash-table-count resources-table) 0))
-                (and templates-table
-                     (> (hash-table-count templates-table) 0)))
-        (push `(resources . ,(make-hash-table)) capabilities))
-      (mcp-server-lib--jsonrpc-response
-       id
-       `((protocolVersion . ,mcp-server-lib-protocol-version)
-         (serverInfo
-          .
-          ((name . ,mcp-server-lib-name)
-           (version . ,mcp-server-lib-protocol-version)))
-         (capabilities . ,capabilities))))))
+  (let ((capabilities (make-hash-table))
+        (tools-table (gethash server-id mcp-server-lib--tools))
+        (resources-table
+         (gethash server-id mcp-server-lib--resources))
+        (templates-table
+         (gethash server-id mcp-server-lib--resource-templates))
+        (server-record (gethash server-id mcp-server-lib--servers)))
+    (when (and tools-table (> (hash-table-count tools-table) 0))
+      (puthash 'tools (make-hash-table) capabilities))
+    (when (or (and resources-table
+                   (> (hash-table-count resources-table) 0))
+              (and templates-table
+                   (> (hash-table-count templates-table) 0)))
+      (puthash 'resources (make-hash-table) capabilities))
+    (mcp-server-lib--jsonrpc-response
+     id
+     ;; `--append-optional-fields' drops fields whose value is nil, so
+     ;; `:instructions nil' (or a server with no stored value) emits no
+     ;; `instructions' field; an empty string is preserved and emitted.
+     (mcp-server-lib--append-optional-fields
+      `((protocolVersion . ,mcp-server-lib-protocol-version)
+        (serverInfo
+         .
+         ((name . ,mcp-server-lib-name)
+          (version . ,mcp-server-lib-protocol-version)))
+        (capabilities . ,capabilities))
+      'instructions (plist-get server-record :instructions)))))
 
 (defun mcp-server-lib--handle-initialized ()
   "Handle initialized notification from client.
@@ -798,7 +1086,7 @@ Returns a list of all registered tools with their metadata."
        tools-table))
     (mcp-server-lib--jsonrpc-response id `((tools . ,tool-list)))))
 
-(defun mcp-server-lib--build-resource-entry
+(defun mcp-server-lib--build-resources-list-entry
     (uri-or-template resource-data is-template)
   "Build a resource entry for resources/list response.
 URI-OR-TEMPLATE is the URI (for direct resources) or URI template.
@@ -831,7 +1119,7 @@ Returns a vector of resource entries."
              (vconcat
               entries
               (vector
-               (mcp-server-lib--build-resource-entry
+               (mcp-server-lib--build-resources-list-entry
                 uri-or-template resource-data is-template)))))
      hash-table)
     entries))
@@ -990,41 +1278,6 @@ METHOD-METRICS is used to track errors for this method."
        mcp-server-lib-jsonrpc-error-invalid-request
        (format "Tool not found: %s" tool-name)))))
 
-;;; Error handling helpers
-
-(defmacro mcp-server-lib-with-error-handling (&rest body)
-  "Execute BODY with automatic error handling for MCP tools.
-
-Any error that occurs during BODY execution is caught and converted to
-an MCP tool error using `mcp-server-lib-tool-throw'.  This ensures
-consistent error reporting to LLM clients.
-
-Arguments:
-  BODY  Forms to execute with error handling
-
-Returns the result of BODY execution if successful.
-
-Example:
-  (defun my-tool-handler (path)
-    \"Read and process a file at PATH.\"
-    (mcp-server-lib-with-error-handling
-      ;; Any errors here will be caught and reported properly
-      (with-temp-buffer
-        (insert-file-contents path)
-        (process-buffer-contents))))
-
-See also: `mcp-server-lib-tool-throw'"
-  `(condition-case err
-       (progn
-         ,@body)
-     (error
-      (mcp-server-lib-tool-throw (format "Error: %S" err)))))
-
-;;; Tool helpers
-
-;;; API - Server
-
-
 ;;; API - Transport
 
 (defun mcp-server-lib-process-jsonrpc (json-string server-id)
@@ -1081,6 +1334,268 @@ REQUEST should be a JSON string containing a valid JSON-RPC 2.0 request.
 Call `mcp-server-lib-process-jsonrpc' and return its result as a parsed alist."
   (json-read-from-string
    (mcp-server-lib-process-jsonrpc request server-id)))
+
+;;; API - Server
+
+(defun mcp-server-lib-register-server (&rest properties)
+  "Register a server with metadata, tools, and resources.
+
+PROPERTIES is a plist that may include:
+
+  :id            Server identifier (defaults to \"default\")
+  :instructions  Optional string describing how to use this server's
+                 tools/resources; emitted as the `instructions' field
+                 in the MCP `initialize' result per the protocol spec.
+                 If nil or omitted, the field is absent from the
+                 response; if a string (including \"\"), the field is
+                 emitted with that value.
+  :tools         Optional list of tool specs.  Each spec is
+                 `(HANDLER :id STR :description STR
+                 [:title STR] [:read-only BOOL])'.
+                 Specs must not include :server-id.
+  :resources     Optional list of resource specs.  Each spec is
+                 `(URI HANDLER :name STR
+                 [:description STR] [:mime-type STR])'.
+                 URIs containing `{var}' are registered as templates.
+                 Specs must not include :server-id.
+
+Unknown top-level property keys signal an error at registration time.
+
+Performs validate-then-apply: every spec is checked before any state
+is mutated.  If validation fails, no state changes.
+
+Within one call, duplicate tool :ids or resource URIs are rejected in
+the validation phase.  Across calls, overlapping :tools or :resources
+increment each entry's reference count; two
+`mcp-server-lib-unregister-server' calls are then needed to fully
+remove an entry registered twice.  When a key collides across calls,
+the original entry's handler and properties are kept; the new spec's
+content (including any handler change) is discarded — only the
+reference count is updated.  To replace an existing handler or
+properties, fully tear down with `mcp-server-lib-unregister-server'
+before re-registering.
+
+This is the opposite of the :instructions policy (last-writer-wins).
+The asymmetry reflects the data model: per-entry tools and resources
+carry their own ref-counts, so the first registration's spec must
+remain stable while later callers hold a ref; :instructions is a
+single value on the server record with no per-key ref-counting.
+
+After validation, the function:
+- increments the per-server metadata record's reference count, creating
+  it with count 1 if absent.  If :instructions is present in PROPERTIES
+  (including with value nil) the field is set to that value
+  (last-writer-wins); this value is not reverted by
+  `mcp-server-lib-unregister-server', which only decrements the count.
+- registers each tool, incrementing its reference count if already
+  present;
+- registers each resource, incrementing its reference count if already
+  present.
+
+Every successful call must be paired with `mcp-server-lib-unregister-server'
+for clean teardown.  This includes calls that supply no :tools, :resources,
+or :instructions, and calls that omit :id (which falls back to \"default\") --
+the per-server metadata record is created or bumped unconditionally.
+
+Calling the function twice where only one call supplies :instructions
+leaves that value in place for subsequent calls that omit :instructions.
+
+Resulting `tools/list' and `resources/list' response order is unspecified.
+
+Example:
+  (mcp-server-lib-register-server
+   :id \"my-server\"
+   :instructions \"Use list-files to enumerate ...\"
+   :tools (list (list #\\='my-list-files
+                      :id \"list-files\"
+                      :description \"List files\"))
+   :resources (list (list \"org://config\" #\\='my-config-handler
+                          :name \"Config\")))
+
+See also: `mcp-server-lib-unregister-server'."
+  (let* ((id-arg (plist-get properties :id))
+         (instructions (plist-get properties :instructions))
+         (tools (plist-get properties :tools))
+         (resources (plist-get properties :resources))
+         (id (or id-arg "default"))
+         tool-entries
+         seen-tool-ids
+         resource-entries
+         seen-resource-uris)
+    (mcp-server-lib--validate-property-keys
+     properties
+     '(:id :instructions :tools :resources)
+     "Server registration")
+    (when (and id-arg (not (stringp id-arg)))
+      (error "Server registration requires :id to be a string"))
+    (when (and instructions (not (stringp instructions)))
+      (error
+       "Server registration requires :instructions to be a string"))
+    (unless (proper-list-p tools)
+      (error
+       "Server registration requires :tools to be a proper list"))
+    (unless (proper-list-p resources)
+      (error
+       "Server registration requires :resources to be a proper list"))
+    (dolist (tool tools)
+      (let* ((built (mcp-server-lib--build-tool-entry tool))
+             (tool-id (car built)))
+        (when (member tool-id seen-tool-ids)
+          (error "Duplicate tool :id %S in :tools" tool-id))
+        (push tool-id seen-tool-ids)
+        (push built tool-entries)))
+    (setq tool-entries (nreverse tool-entries))
+    (dolist (resource resources)
+      (let* ((built (mcp-server-lib--build-resource-entry resource))
+             (uri (car built)))
+        (when (member uri seen-resource-uris)
+          (error "Duplicate resource URI %S in :resources" uri))
+        (push uri seen-resource-uris)
+        (push built resource-entries)))
+    (setq resource-entries (nreverse resource-entries))
+    ;; Infallible by construction: all errors are surfaced in the
+    ;; validation/build phase above.  Order of updates here is not
+    ;; observable.
+    (if-let* ((existing (gethash id mcp-server-lib--servers)))
+        (progn
+          (mcp-server-lib--bump-ref-count existing)
+          (when (plist-member properties :instructions)
+            (plist-put existing :instructions instructions)))
+      (let ((record (list :ref-count 1)))
+        (when (plist-member properties :instructions)
+          (plist-put record :instructions instructions))
+        (puthash id record mcp-server-lib--servers)))
+    (dolist (built tool-entries)
+      (mcp-server-lib--apply-tool-entry (car built) (cdr built) id))
+    (dolist (built resource-entries)
+      (mcp-server-lib--apply-resource-entry
+       (car built) (cdr built) id))
+    nil))
+
+;;; API - Bulk unregister
+
+(defun mcp-server-lib--bulk-unregister-table (server-id outer-table)
+  "Decrement ref-count of every entry in OUTER-TABLE under SERVER-ID.
+OUTER-TABLE is one of `mcp-server-lib--tools',
+`mcp-server-lib--resources', or `mcp-server-lib--resource-templates'.
+If SERVER-ID has no inner table, does nothing.  If every entry was
+fully removed (ref-count reached zero), the now-empty inner table is
+also removed from OUTER-TABLE; otherwise it is left in place so that
+surviving ref-counted entries remain reachable.
+
+Keys are snapshotted before iteration so that
+`mcp-server-lib--ref-counted-unregister' is free to `remhash' entries as
+it iterates."
+  (when-let* ((inner-table (gethash server-id outer-table)))
+    (dolist (key (hash-table-keys inner-table))
+      (mcp-server-lib--ref-counted-unregister key inner-table))
+    (when (zerop (hash-table-count inner-table))
+      (remhash server-id outer-table))))
+
+(defun mcp-server-lib-unregister-server (server-id)
+  "Bulk-unregister every tool, resource, template, and record for SERVER-ID.
+
+SERVER-ID is the server identifier string (required; pass \"default\"
+explicitly to operate on the default server).
+
+Each registered tool, resource, or template under SERVER-ID has its
+reference count decremented exactly once.  Entries whose reference count
+was 1 are fully removed; entries whose count was greater than 1 remain
+registered with the count decremented.  This preserves the ref-count
+contract used by nested register/unregister scopes (e.g. in test
+fixtures).
+
+Per-kind teardown iterates the tools/resources/templates tables
+regardless of how entries were registered, so this also clears entries
+registered via the obsolete `mcp-server-lib-register-tool' or
+`mcp-server-lib-register-resource'.
+
+The per-server metadata record (which holds optional `:instructions')
+has its reference count decremented exactly once and is removed when
+the count reaches zero — the same contract as tools, resources, and
+templates.  Its `:instructions' value is never reverted by this
+function; only `mcp-server-lib-register-server' updates it.
+
+Calling this function on an unknown SERVER-ID is a silent no-op.
+
+Example:
+  (defun my-mcp-disable ()
+    (mcp-server-lib-unregister-server \"my-server\"))
+
+See also: `mcp-server-lib-register-server'."
+  (mcp-server-lib--bulk-unregister-table
+   server-id mcp-server-lib--tools)
+  (mcp-server-lib--bulk-unregister-table
+   server-id mcp-server-lib--resources)
+  (mcp-server-lib--bulk-unregister-table
+   server-id mcp-server-lib--resource-templates)
+  (mcp-server-lib--ref-counted-unregister
+   server-id mcp-server-lib--servers)
+  nil)
+
+;;; API - Error handling
+
+(defmacro mcp-server-lib-with-error-handling (&rest body)
+  "Execute BODY with automatic error handling for MCP tools.
+
+Any error that occurs during BODY execution is caught and converted to
+an MCP tool error using `mcp-server-lib-tool-throw'.  This ensures
+consistent error reporting to LLM clients.
+
+Arguments:
+  BODY  Forms to execute with error handling
+
+Returns the result of BODY execution if successful.
+
+Example:
+  (defun my-tool-handler (path)
+    \"Read and process a file at PATH.\"
+    (mcp-server-lib-with-error-handling
+      ;; Any errors here will be caught and reported properly
+      (with-temp-buffer
+        (insert-file-contents path)
+        (process-buffer-contents))))
+
+See also: `mcp-server-lib-tool-throw'"
+  `(condition-case err
+       (progn
+         ,@body)
+     (error
+      (mcp-server-lib-tool-throw (format "Error: %S" err)))))
+
+(defun mcp-server-lib-tool-throw (error-message)
+  "Signal a tool error with ERROR-MESSAGE.
+The error will be properly formatted and sent to the client.
+This should be used within tool handlers to indicate failures.
+
+Arguments:
+  ERROR-MESSAGE  String describing the error
+
+Example:
+  (defun my-tool-handler (path)
+    \"List files in PATH.
+
+MCP Parameters:
+  path - directory path to list\"
+    (unless (file-directory-p path)
+      (mcp-server-lib-tool-throw
+       (format \"Not a directory: %s\" path)))
+    ;; ... rest of implementation ...)
+
+See also: `mcp-server-lib-with-error-handling'"
+  (signal 'mcp-server-lib-tool-error (list error-message)))
+
+(defun mcp-server-lib-resource-signal-error (code message)
+  "Signal a JSON-RPC error from a resource handler.
+
+CODE is the JSON-RPC error code constant (e.g.,
+`mcp-server-lib-jsonrpc-error-invalid-params' or
+`mcp-server-lib-jsonrpc-error-internal').
+MESSAGE is the error message string.
+
+This function does not return - it signals an error condition that
+will be caught by the resource handler infrastructure."
+  (signal 'mcp-server-lib-resource-error (list code message)))
 
 ;;; API - Utilities
 
@@ -1142,10 +1657,14 @@ Example:
      ("id" . ,(or id 1))
      ("params" . (("uri" . ,uri))))))
 
-;;; API - Tools
+;;; API - Tools (obsolete)
 
 (defun mcp-server-lib-register-tool (handler &rest properties)
   "Register a tool with the MCP server.
+
+This function is obsolete as of 0.3.0; pass a `:tools' entry to
+`mcp-server-lib-register-server'.  The outer `:id' there replaces the
+`:server-id' property below; the tool's `:id' carries through.
 
 Arguments:
   HANDLER          Function to handle tool invocations
@@ -1190,187 +1709,67 @@ MCP Parameters:
     :id \"read-file\"
     :description \"Read contents of a file\")
 
-See also:
-  `mcp-server-lib-unregister-tool' - Remove a registered tool
-  `mcp-server-lib-with-error-handling' - Error handling for tool handlers
-  `mcp-server-lib-tool-throw' - Signal errors from tool handlers"
-  (let* ((id (plist-get properties :id))
-         (description (plist-get properties :description))
-         (title (plist-get properties :title))
-         (read-only (plist-get properties :read-only))
-         (server-id (or (plist-get properties :server-id) "default"))
-         (tools-table (mcp-server-lib--get-server-tools server-id)))
-    ;; Error checking for required properties
-    (unless (functionp handler)
-      (error "Tool registration requires handler function"))
-    (unless id
-      (error "Tool registration requires :id property"))
-    (unless description
-      (error "Tool registration requires :description property"))
-    ;; Check for existing registration
-    (if-let* ((existing (gethash id tools-table)))
-      (mcp-server-lib--ref-counted-register id existing tools-table)
-      (let* ((schema
-              (mcp-server-lib--generate-schema-from-function handler))
-             (tool
-              (list
-               :id id
-               :description description
-               :handler handler
-               :schema schema)))
-        ;; Add optional properties if provided
-        (when title
-          (setq tool (plist-put tool :title title)))
-        ;; Always include :read-only if it was specified, even if nil
-        (when (plist-member properties :read-only)
-          (setq tool (plist-put tool :read-only read-only)))
-        ;; Register the tool
-        (mcp-server-lib--ref-counted-register id tool tools-table)))))
+See also: `mcp-server-lib-register-server'"
+  ;; Catches duplicate/trailing :server-id (masked by --plist-remove below).
+  (mcp-server-lib--validate-property-keys
+   properties
+   '(:id :description :title :read-only :server-id)
+   "Tool spec")
+  (let ((sid (plist-get properties :server-id)))
+    (when (and sid (not (stringp sid)))
+      (error "Tool registration requires :server-id to be a string")))
+  ;; See `mcp-server-lib--servers' docstring for why this is untouched.
+  (let* ((server-id (or (plist-get properties :server-id) "default"))
+         (spec
+          (cons
+           handler
+           (mcp-server-lib--plist-remove properties :server-id)))
+         (built (mcp-server-lib--build-tool-entry spec)))
+    (mcp-server-lib--apply-tool-entry
+     (car built) (cdr built) server-id)))
+
+(make-obsolete
+ 'mcp-server-lib-register-tool
+ 'mcp-server-lib-register-server
+ "0.3.0")
 
 (defun mcp-server-lib-unregister-tool (tool-id &optional server-id)
   "Unregister a tool with ID TOOL-ID from the MCP server with SERVER-ID.
 
-Returns t if the tool was found and removed, nil otherwise.
+This function is obsolete as of 0.3.0.  No per-key replacement: pair
+each `mcp-server-lib-register-server' with one
+`mcp-server-lib-unregister-server' (which tears down every entry the
+bundled call registered).
 
-See also: `mcp-server-lib-register-tool'"
-  (let ((tools-table
-         (mcp-server-lib--get-server-tools (or server-id "default"))))
+This decrements TOOL-ID's reference count only; the per-server metadata
+record created by `mcp-server-lib-register-server' (if any) is left in
+place.  Use `mcp-server-lib-unregister-server' to clear the record as
+well.
+
+Returns t if TOOL-ID was found (its reference count was decremented,
+or the entry was removed when the count reached zero); nil if no such
+tool exists.
+
+See also: `mcp-server-lib-register-server',
+`mcp-server-lib-unregister-server'."
+  (when-let* ((tools-table
+               (gethash
+                (or server-id "default") mcp-server-lib--tools)))
     (mcp-server-lib--ref-counted-unregister tool-id tools-table)))
 
-;; Custom error type for tool errors
-(define-error 'mcp-server-lib-tool-error "MCP tool error" 'user-error)
-(define-error 'mcp-server-lib-resource-error "MCP resource error")
-(define-error 'mcp-server-lib-invalid-params "MCP invalid parameters")
+(make-obsolete
+ 'mcp-server-lib-unregister-tool
+ 'mcp-server-lib-unregister-server
+ "0.3.0")
 
-(defun mcp-server-lib-tool-throw (error-message)
-  "Signal a tool error with ERROR-MESSAGE.
-The error will be properly formatted and sent to the client.
-This should be used within tool handlers to indicate failures.
-
-Arguments:
-  ERROR-MESSAGE  String describing the error
-
-Example:
-  (defun my-tool-handler (path)
-    \"List files in PATH.
-
-MCP Parameters:
-  path - directory path to list\"
-    (unless (file-directory-p path)
-      (mcp-server-lib-tool-throw
-       (format \"Not a directory: %s\" path)))
-    ;; ... rest of implementation ...)
-
-See also: `mcp-server-lib-with-error-handling'"
-  (signal 'mcp-server-lib-tool-error (list error-message)))
-
-(defun mcp-server-lib--parse-uri-template (template)
-  "Parse URI TEMPLATE into segments.
-Returns plist with :segments, :variables, and :pattern.
-Supports RFC 6570 simple variables {var} and reserved expansion {+var}."
-  ;; First check for balanced braces
-  (let ((open-count 0)
-        (close-count 0)
-        (i 0))
-    (while (< i (length template))
-      (cond
-       ((eq (aref template i) ?{)
-        (setq open-count (1+ open-count)))
-       ((eq (aref template i) ?})
-        (setq close-count (1+ close-count))))
-      (setq i (1+ i)))
-    ;; Check for balanced braces after processing entire string
-    (unless (= open-count close-count)
-      (error "Unbalanced braces in resource template: %s" template)))
-
-  (let ((segments '())
-        (variables '())
-        (pos 0)
-        (len (length template)))
-    ;; Process template character by character
-    (while (< pos len)
-      (if-let ((var-start (string-match "{" template pos)))
-        ;; Found variable start
-        (progn
-          ;; Add literal segment before variable if any
-          (when (> var-start pos)
-            (push (list
-                   :type 'literal
-                   :value (substring template pos var-start))
-                  segments))
-          ;; Find variable end (guaranteed to exist due to balance check)
-          (let* ((var-end (string-match "}" template var-start))
-                 ;; Extract variable content
-                 (var-content
-                  (substring template (1+ var-start) var-end))
-                 (reserved
-                  (and (> (length var-content) 0)
-                       (eq (aref var-content 0) ?+)))
-                 (var-name
-                  (if reserved
-                      (substring var-content 1)
-                    var-content)))
-            ;; Validate variable name
-            ;; RFC 6570: Variable names must start with ALPHA / "_"
-            ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
-            (unless (string-match-p
-                     "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
-              (error
-               "Invalid variable name '%s' in resource template: %s"
-               var-name
-               template))
-            ;; Add variable segment
-            (push (list
-                   :type 'variable
-                   :name var-name
-                   :reserved reserved)
-                  segments)
-            (push var-name variables)
-            (setq pos (1+ var-end))))
-        ;; No more variables, add remaining literal
-        (when (< pos len)
-          (push (list :type 'literal :value (substring template pos))
-                segments))
-        (setq pos len)))
-    ;; Return parsed structure
-    (list
-     :segments (nreverse segments)
-     :variables (nreverse variables)
-     :pattern template)))
-
-(defun mcp-server-lib--register-resource-internal
-    (uri handler properties hash-table extra-props)
-  "Internal helper for resource registration.
-URI is the resource URI.
-HANDLER is the handler function.
-PROPERTIES is the plist of properties.
-HASH-TABLE is either `mcp-server-lib--resources' or
-`mcp-server-lib--resource-templates'.
-EXTRA-PROPS is a plist of additional properties to include (e.g., :parsed)."
-  (let ((name (plist-get properties :name))
-        (description (plist-get properties :description))
-        (mime-type (plist-get properties :mime-type)))
-    ;; Error checking for required properties
-    (unless (functionp handler)
-      (error "Resource registration requires handler function"))
-    (unless name
-      (error "Resource registration requires :name property"))
-
-    (if-let* ((existing (gethash uri hash-table)))
-      (mcp-server-lib--ref-counted-register uri existing hash-table)
-      (let ((entry
-             (append (list :handler handler :name name) extra-props)))
-        (when description
-          (setq entry (plist-put entry :description description)))
-        (when mime-type
-          (setq entry (plist-put entry :mime-type mime-type)))
-        (mcp-server-lib--ref-counted-register
-         uri entry hash-table)))))
-
-;;; API - Resources
+;;; API - Resources (obsolete)
 
 (defun mcp-server-lib-register-resource (uri handler &rest properties)
   "Register a resource with the MCP server.
+
+This function is obsolete as of 0.3.0; pass a `:resources' entry to
+`mcp-server-lib-register-server'.  The outer `:id' there replaces the
+`:server-id' property below.
 
 Automatically detects whether URI is a template based on presence of {}.
 
@@ -1411,36 +1810,45 @@ Examples:
    :name \"Org file outline\"
    :description \"Hierarchical outline of an Org file\")
 
-See also: `mcp-server-lib-unregister-resource'"
-  (let* ((server-id (or (plist-get properties :server-id) "default"))
-         (resources-table
-          (mcp-server-lib--get-server-resources server-id))
-         (templates-table
-          (mcp-server-lib--get-server-templates server-id)))
-    ;; Check for proper URI structure: scheme://path
-    (unless (string-match-p mcp-server-lib--uri-with-scheme-regex uri)
+See also: `mcp-server-lib-register-server'"
+  ;; Catches duplicate/trailing :server-id (masked by --plist-remove below).
+  (mcp-server-lib--validate-property-keys
+   properties
+   '(:name :description :mime-type :server-id)
+   "Resource spec")
+  (let ((sid (plist-get properties :server-id)))
+    (when (and sid (not (stringp sid)))
       (error
-       "Resource URI must have format 'scheme://path': '%s'" uri))
-    ;; Check for unmatched }
-    (when (and (string-match-p "}" uri)
-               (not (string-match-p "{" uri)))
-      (error "Unmatched '}' in resource URI: %s" uri))
-    ;; Check if this is a template by looking for unescaped {
-    (if (string-match-p "{" uri)
-        ;; It's a template - delegate to template logic
-        (let ((parsed (mcp-server-lib--parse-uri-template uri)))
-          (mcp-server-lib--register-resource-internal
+       "Resource registration requires :server-id to be a string")))
+  ;; See `mcp-server-lib--servers' docstring for why this is untouched.
+  (let* ((server-id (or (plist-get properties :server-id) "default"))
+         (spec
+          (cons
            uri
-           handler
-           properties
-           templates-table
-           (list :parsed parsed)))
-      ;; It's a static resource
-      (mcp-server-lib--register-resource-internal
-       uri handler properties resources-table nil))))
+           (cons
+            handler
+            (mcp-server-lib--plist-remove properties :server-id))))
+         (built (mcp-server-lib--build-resource-entry spec)))
+    (mcp-server-lib--apply-resource-entry
+     (car built) (cdr built) server-id)))
+
+(make-obsolete
+ 'mcp-server-lib-register-resource
+ 'mcp-server-lib-register-server
+ "0.3.0")
 
 (defun mcp-server-lib-unregister-resource (uri &optional server-id)
   "Unregister a resource by its URI.
+
+This function is obsolete as of 0.3.0.  No per-key replacement: pair
+each `mcp-server-lib-register-server' with one
+`mcp-server-lib-unregister-server' (which tears down every entry the
+bundled call registered).
+
+This decrements URI's reference count only; the per-server metadata
+record created by `mcp-server-lib-register-server' (if any) is left in
+place.  Use `mcp-server-lib-unregister-server' to clear the record as
+well.
 
 Automatically detects whether URI is a template based on presence of {}.
 
@@ -1448,82 +1856,33 @@ Arguments:
   URI       The URI or URI template to unregister
   SERVER-ID Server identifier (optional, defaults to \"default\")
 
-Returns t if the resource was found and removed, nil otherwise.
+Returns t if URI was found (its reference count was decremented, or
+the entry was removed when the count reached zero); nil if no such
+resource exists.
 
 Examples:
   (mcp-server-lib-unregister-resource \"org://projects.org\")
   (mcp-server-lib-unregister-resource \"org://{filename}/outline\")
 
-See also: `mcp-server-lib-register-resource'"
-  (let* ((server-id (or server-id "default"))
-         (resources-table
-          (mcp-server-lib--get-server-resources server-id))
-         (templates-table
-          (mcp-server-lib--get-server-templates server-id)))
+See also: `mcp-server-lib-register-server',
+`mcp-server-lib-unregister-server'."
+  (let ((server-id (or server-id "default")))
     ;; Check if this is a template by looking for unescaped {
     (if (string-match-p "{" uri)
-        ;; It's a template
-        (mcp-server-lib--ref-counted-unregister uri templates-table)
-      ;; It's a static resource
-      (mcp-server-lib--ref-counted-unregister uri resources-table))))
+        (when-let* ((templates-table
+                     (gethash
+                      server-id mcp-server-lib--resource-templates)))
+          (mcp-server-lib--ref-counted-unregister
+           uri templates-table))
+      (when-let* ((resources-table
+                   (gethash server-id mcp-server-lib--resources)))
+        (mcp-server-lib--ref-counted-unregister
+         uri resources-table)))))
 
-(defun mcp-server-lib-resource-signal-error (code message)
-  "Signal a JSON-RPC error from a resource handler.
-
-CODE is the JSON-RPC error code constant (e.g.,
-`mcp-server-lib-jsonrpc-error-invalid-params' or
-`mcp-server-lib-jsonrpc-error-internal').
-MESSAGE is the error message string.
-
-This function does not return - it signals an error condition that
-will be caught by the resource handler infrastructure."
-  (signal 'mcp-server-lib-resource-error (list code message)))
-
-;;; API - Bulk unregister
-
-(defun mcp-server-lib--bulk-unregister-table (server-id outer-table)
-  "Decrement ref-count of every entry in OUTER-TABLE under SERVER-ID.
-OUTER-TABLE is one of `mcp-server-lib--tools',
-`mcp-server-lib--resources', or `mcp-server-lib--resource-templates'.
-If SERVER-ID has no inner table, does nothing.
-
-Keys are snapshotted before iteration so that
-`mcp-server-lib--ref-counted-unregister' is free to `remhash' entries as
-it iterates."
-  (when-let* ((inner-table (gethash server-id outer-table)))
-    (dolist (key (hash-table-keys inner-table))
-      (mcp-server-lib--ref-counted-unregister key inner-table))))
-
-(defun mcp-server-lib-unregister-server (server-id)
-  "Bulk-unregister every tool, resource, and template for SERVER-ID.
-
-SERVER-ID is the server identifier string (required; pass \"default\"
-explicitly to operate on the default server).
-
-Each registered key under SERVER-ID has its reference count decremented
-exactly once.  Entries whose reference count was 1 are fully removed;
-entries whose count was greater than 1 remain registered with the count
-decremented.  This preserves the ref-count contract used by nested
-register/unregister scopes (e.g. in test fixtures).
-
-Calling this function on an unknown SERVER-ID is a silent no-op.
-
-Returns nil.
-
-Example:
-  (defun my-mcp-disable ()
-    (mcp-server-lib-unregister-server \"my-server\"))
-
-See also:
-  `mcp-server-lib-unregister-tool'
-  `mcp-server-lib-unregister-resource'"
-  (mcp-server-lib--bulk-unregister-table
-   server-id mcp-server-lib--tools)
-  (mcp-server-lib--bulk-unregister-table
-   server-id mcp-server-lib--resources)
-  (mcp-server-lib--bulk-unregister-table
-   server-id mcp-server-lib--resource-templates)
-  nil)
+(make-obsolete
+ 'mcp-server-lib-unregister-resource
+ 'mcp-server-lib-unregister-server
+ "0.3.0")
 
 (provide 'mcp-server-lib)
 ;;; mcp-server-lib.el ends here

@@ -4,18 +4,92 @@ mcp-server-lib.el NEWS -- history of user-visible changes
 
 ** New Features
 
-*** Bulk unregistration of all server entries
-    The new function mcp-server-lib-unregister-server unregisters every tool,
-    resource, and resource template registered under a given server-id in a
+*** Bundled server registration via `mcp-server-lib-register-server'
+    New single-entry function for registering an MCP server's tools,
+    resources, and metadata in one call.  Accepts `:id',
+    `:instructions', `:tools', and `:resources'; validates atomically
+    (all-or-nothing) and ref-counts entries that overlap with prior
+    calls.  See the function's docstring for the full contract.
+
+*** Bulk unregistration via `mcp-server-lib-unregister-server'
+    New function: tears down every tool, resource, resource template,
+    and per-server metadata record registered under a server-id in a
     single call:
 
     (mcp-server-lib-unregister-server "my-server")
 
+    Symmetric counterpart to `mcp-server-lib-register-server'.  See
+    that function's docstring for ref-count semantics.
+
+*** Per-server `instructions' field in initialize response
+    `mcp-server-lib-register-server' accepts `:instructions', a string
+    emitted in the MCP `initialize' result per the protocol spec.  See
+    the function's docstring for details.
+
+    For servers introducing instructions and using
+    `mcp-server-lib-ert-with-server' (or
+    `mcp-server-lib-ert-assert-initialize-result') for testing, pass
+    `:instructions STR' to the helper so it asserts the field equals
+    STR.  These helpers now assert by default that the `instructions'
+    field is absent from the initialize result.
+
+** Deprecations
+
+*** Individual register / unregister functions
+    The following functions are now obsolete in favor of the bundled
+    `mcp-server-lib-register-server' /
+    `mcp-server-lib-unregister-server' form:
+
+    - `mcp-server-lib-register-tool'
+    - `mcp-server-lib-register-resource'
+    - `mcp-server-lib-unregister-tool'
+    - `mcp-server-lib-unregister-resource'
+
+    The migration is per-fixture, not per-call: there is no per-key
+    replacement for `mcp-server-lib-unregister-tool' or
+    `mcp-server-lib-unregister-resource'.  Pair each bundled
+    `mcp-server-lib-register-server' with one
+    `mcp-server-lib-unregister-server', which decrements the
+    reference count of every tool, resource, and template under
+    the matching server-id (regardless of which register API
+    created them) plus the per-server metadata record.
+
+    The deprecated functions continue to work; references to them
+    produce byte-compile warnings pointing at the new bundled API.
+
 ** Bug Fixes
 
-* Changes in mcp-server-lib 0.2.1 (unreleased)
+*** Strict validation of register-server inputs
+    `mcp-server-lib-register-server' and the (now obsolete) individual
+    register-tool / register-resource wrappers reject:
+    - unknown property keys at any level (top-level register-server
+      keys and tool/resource spec keys alike);
+    - duplicate property keys at any level (e.g. `:description'
+      repeated within one tool spec);
+    - non-string values for string-typed fields (`:id', `:description',
+      `:title', `:name', `:mime-type', resource URI, and `:server-id'
+      on the obsolete `register-tool' / `register-resource' wrappers);
+    - non-boolean values for `:read-only';
+    - odd-length property lists (e.g. a trailing key with no value);
+    - improper (dotted) lists where a proper list is required
+      (top-level `:tools' and `:resources', plus tool and resource
+      spec property lists).
 
-** Bug Fixes
+    Allowed keys are `:id', `:instructions', `:tools', `:resources' at
+    the top level; `:id', `:description', `:title', `:read-only' for
+    tools; and `:name', `:description', `:mime-type' for resources.
+
+    For the obsolete wrappers this is stricter than 0.2.0, which
+    silently ignored unknown property keys.
+
+*** Fixed `initialize' response emitting `null' for empty capabilities
+    A server with no registered tools, resources, or templates used to
+    emit `"capabilities":null' in the `initialize' response.  The MCP
+    2025-03-26 schema requires `capabilities' to be a JSON object; the
+    response now emits `"capabilities":{}' in the empty case (and the
+    populated case is unchanged).  Spec-conformant clients that
+    validate against the JSON Schema would previously reject the
+    response.
 
 *** Use portable shebang in emacs-mcp-stdio.sh
     Changed the shebang from ~#!/bin/bash~ to ~#!/usr/bin/env bash~ so the
@@ -30,6 +104,23 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     This caused string= comparisons against multibyte Emacs strings to fail.
     The library now decodes incoming JSON strings to multibyte before parsing,
     fixing non-ASCII parameter handling for all transports.
+
+** API Changes
+
+*** ERT helper signature changes
+    Downstream test code using the ERT helpers may need adjustment:
+
+    - `mcp-server-lib-ert-assert-initialize-result' gained `&key
+      :instructions'.  Existing three-positional-argument calls
+      `(... result tools resources)' continue to work without change;
+      the new keyword is optional.
+
+    - `mcp-server-lib-ert-with-server' now rejects unknown keywords
+      at the head of BODY at macro-expansion time.  Previously, the
+      macro used `&allow-other-keys' and silently ignored typo
+      keywords (e.g. `:tols' instead of `:tools'), which could mask
+      misspelled assertions.  Tests that pass an unknown keyword will
+      now error; fix the typo to migrate.
 
 * Changes in mcp-server-lib 0.2.0 (2025-11-03)
 

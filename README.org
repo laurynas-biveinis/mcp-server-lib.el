@@ -73,15 +73,61 @@ For debugging, set =EMACS_MCP_DEBUG_LOG= to a file path.
 
 ** API Reference
 
-*** Registering Tools
+*** Registration
+
+Use =mcp-server-lib-register-server= to declare a server's metadata, tools, and resources in a single call. Within one call, duplicate tool =:id=s or resource URIs are rejected.
 
 #+begin_src elisp
-(mcp-server-lib-register-tool #'my-function
-  :id "tool-name"
-  :description "What this tool does"
-  :title "Display Name"        ; optional
-  :read-only t                 ; optional
-  :server-id "my-server")      ; optional
+(mcp-server-lib-register-server
+  :id "my-server"                                          ; optional, defaults to "default"
+  :instructions "Cite source resource URIs when quoting their contents."  ; optional
+  :tools
+  (list
+   (list #'my-list-files
+         :id "list-files"
+         :description "Lists all files"
+         :title "List Files"        ; optional
+         :read-only t)              ; optional
+   (list #'update-todo-state
+         :id "update-todo"
+         :description "Update task TODO state"))
+  :resources
+  (list
+   (list "resource://uri"
+         (lambda () "resource content")
+         :name "Resource Name"
+         :description "What this provides"    ; optional
+         :mime-type "text/plain")             ; optional
+   ;; Template URIs (containing {var}) are detected automatically
+   (list "org://{filename}"
+         (lambda (params)
+           (with-temp-buffer
+             (insert-file-contents
+              (alist-get "filename" params nil nil #'string=))
+             (buffer-string)))
+         :name "Org file content")))
+#+end_src
+
+Each entry is registered with reference counting, so two bundled calls with overlapping entries increment ref-counts and need two =mcp-server-lib-unregister-server= calls to fully tear down.
+
+Every =mcp-server-lib-register-server= call creates or bumps a per-server metadata record, so each successful call must be paired with =mcp-server-lib-unregister-server= for clean teardown -- including calls that supply no =:tools=, =:resources=, or =:instructions=, and calls that rely on the default ="default"= =:id=.
+
+The =:instructions= string is emitted in the server's =initialize= response (per the MCP protocol spec), giving the client's LLM guidance on how to use the server's tools and resources.
+
+**** Updating an existing tool or resource
+
+Re-registration under an existing key keeps the original spec; the new handler and properties are discarded and only the ref-count is bumped. This first-writer-wins policy keeps overlapping tools/resources stable for as long as any caller still holds a reference. To update a handler or properties, tear down with =mcp-server-lib-unregister-server= first and then re-register. =:instructions= is an exception (last-writer-wins) because it lives on the server record with no per-key ref-count.
+
+*** Tool Handlers
+
+Tool handler functions:
+
+#+begin_src elisp
+;; Tool handler with no parameters
+(defun my-list-files ()
+  "List files in the current directory."
+  (mcp-server-lib-with-error-handling
+    (mapconcat #'identity (directory-files ".") "\n")))
 
 ;; Tool handler with one parameter
 (defun my-handler (location)
@@ -103,13 +149,8 @@ MCP Parameters:
   new-state - New TODO state to set"
   (mcp-server-lib-with-error-handling
     ;; Direct access to parameters, no alist-get needed
-    (message "Updating %s from %s to %s" 
+    (message "Updating %s from %s to %s"
              resource-uri current-state new-state)))
-
-(mcp-server-lib-register-tool #'update-todo-state
-  :id "update-todo"
-  :description "Update task TODO state"
-  :server-id "my-server")  ; optional
 #+end_src
 
 **** MCP Parameters Format
@@ -150,53 +191,46 @@ If a tool cannot complete its operation successfully, it should use
 =mcp-server-lib-tool-throw= for throwing an error or the implementation should be
 wrapped with =mcp-server-lib-with-error-handling=.
 
-Optional properties:
+Tool entry properties accepted in =:tools=:
+- =:id= (required) - String identifier for the tool (e.g., ="list-files"=)
+- =:description= (required) - String describing what the tool does
 - =:title= - User-friendly display name
 - =:read-only= - Set to =t= if tool doesn't modify state
-- =:server-id= - Server identifier (optional, defaults to ="default"=)
 
-*** Registering Resources
+Unknown or duplicate property keys signal an error at registration time.
 
-The library uses a unified API for both static and templated resources. The presence of ={variable}= syntax automatically determines whether a resource is static or templated:
+*** Resource Handlers
+
+The library uses a unified API for both static and templated resources. The presence of ={variable}= syntax in a URI automatically determines whether the entry is a static resource or a template.
+
+Resource handlers go in the =:resources= list of =mcp-server-lib-register-server=; each entry is =(URI HANDLER &rest PROPERTIES)= so the handler is the second element.
 
 #+begin_src elisp
-;; Static resource (no variables)
-(mcp-server-lib-register-resource "resource://uri"
-  (lambda () "resource content")
-  :name "Resource Name"
-  :description "What this provides"    ; optional
-  :mime-type "text/plain"              ; optional
-  :server-id "my-server")              ; optional
+;; Static resource (no variables): handler takes no arguments
+(lambda () "resource content")
 
-;; Dynamic resource example
-(mcp-server-lib-register-resource "buffer://current"
-  (lambda () (buffer-string))
-  :name "Current Buffer"
-  :server-id "my-server")  ; optional
+;; Template resource with simple variable: handler takes params alist
+(lambda (params)
+  (with-temp-buffer
+    (insert-file-contents (alist-get "filename" params nil nil #'string=))
+    (buffer-string)))
 
-;; Template resource with simple variable
-(mcp-server-lib-register-resource "org://{filename}"
-  (lambda (params)
-    (with-temp-buffer
-      (insert-file-contents (alist-get "filename" params nil nil #'string=))
-      (buffer-string)))
-  :name "Org file content"
-  :description "Read any org file by name"
-  :server-id "my-server")  ; optional
-
-;; Template with multiple variables
-(mcp-server-lib-register-resource "org://{filename}/headline/{+path}"
-  (lambda (params)
-    (let ((file (alist-get "filename" params nil nil #'string=))
-          (path (alist-get "path" params nil nil #'string=)))
-      ;; path can contain slashes with {+path}
-      (org-get-headline-content file path)))
-  :name "Org headline"
-  :description "Get specific headline from org file"
-  :server-id "my-server")  ; optional
+;; Template with multiple variables (including {+var} for reserved expansion)
+(lambda (params)
+  (let ((file (alist-get "filename" params nil nil #'string=))
+        (path (alist-get "path" params nil nil #'string=)))
+    ;; path can contain slashes with {+path}
+    (org-get-headline-content file path)))
 #+end_src
 
-Static resource handlers take no arguments and return strings. Template resource handlers receive an alist of parameters extracted from the URI.
+Resource entry properties accepted in =:resources=:
+- The first list element is the =URI= (required string)
+- The second list element is the =handler= function (required)
+- =:name= (required) - Human-readable name
+- =:description= - Description of the resource
+- =:mime-type= - MIME type (default: ="text/plain"=)
+
+Unknown or duplicate property keys signal an error at registration time.
 
 Supported template syntax (RFC 6570 subset):
 - ={variable}= - Simple variable expansion
@@ -240,15 +274,18 @@ It is also possible to use regular =error= or =signal= calls, which would return
 Resource template handlers receive extracted parameters as an alist. These parameters are matched from the URI but not automatically decoded - if you're working with file paths that might contain special characters, you'll want to decode them:
 
 #+begin_src elisp
-(mcp-server-lib-register-resource "file://{path}"
-  (lambda (params)
-    (let ((path (alist-get "path" params nil nil #'string=)))
-      ;; Decode if needed for filesystem access
-      (with-temp-buffer
-        (insert-file-contents (url-unhex-string path))
-        (buffer-string))))
-  :name "File reader"
-  :server-id "my-server")  ; optional
+(mcp-server-lib-register-server
+  :id "my-server"
+  :resources
+  (list
+   (list "file://{path}"
+         (lambda (params)
+           (let ((path (alist-get "path" params nil nil #'string=)))
+             ;; Decode if needed for filesystem access
+             (with-temp-buffer
+               (insert-file-contents (url-unhex-string path))
+               (buffer-string))))
+         :name "File reader")))
 #+end_src
 
 Variable names in templates follow simple rules - stick to letters, numbers, and underscores. The URI scheme (like =file://= or =org://=) needs to be a valid URI scheme starting with a letter. URI schemes are case-insensitive per RFC 3986, so =HTTP://example.com= will match a template registered as =http://{domain}=.
@@ -263,21 +300,29 @@ The implementation uses non-greedy (first-match) behavior when matching variable
 
 *** Unregistration
 
-To tear down everything a package registered with a given =:server-id= (for example, in a =-disable= function), call =mcp-server-lib-unregister-server= once instead of mirroring each registration with an individual unregister call. This is the preferred teardown pattern for packages built on =mcp-server-lib= — it removes the need to keep register and unregister code in sync as your tool set grows.
+To tear down everything a package registered with a given server-id (for example, in a =-disable= function), call =mcp-server-lib-unregister-server=. This is the symmetric counterpart of =mcp-server-lib-register-server=:
 
 #+begin_src elisp
 (defun my-mcp-disable ()
   (mcp-server-lib-unregister-server "my-server"))
 #+end_src
 
-The function decrements each registered entry's reference count exactly once. Entries whose count was one are fully removed; entries with a higher count (e.g. from nested test fixtures) remain with the count reduced. Calling =mcp-server-lib-unregister-server= on an unknown server-id is a silent no-op. Pass ="default"= explicitly to operate on the default server.
+Each registered entry — tools, resources, templates, and the per-server metadata record holding optional =:instructions= — has its reference count decremented exactly once. Entries whose count was one are fully removed; entries with a higher count (e.g. from nested test fixtures) remain at the reduced count. =:instructions= is never reverted by =mcp-server-lib-unregister-server=; only =mcp-server-lib-register-server= updates it. Calling =mcp-server-lib-unregister-server= on an unknown server-id is a silent no-op. Pass ="default"= explicitly to operate on the default server.
 
-To unregister a single resource (static or templated):
+*** Deprecated APIs
 
-#+begin_src elisp
-(mcp-server-lib-unregister-resource "org://{filename}" :server-id "my-server")
-(mcp-server-lib-unregister-resource "resource://uri" :server-id "my-server")
-#+end_src
+The individual registration / unregistration functions are obsolete as of 0.3.0 in favor of the bundled =mcp-server-lib-register-server= / =mcp-server-lib-unregister-server= form:
+
+- =mcp-server-lib-register-tool=
+- =mcp-server-lib-register-resource=
+- =mcp-server-lib-unregister-tool=
+- =mcp-server-lib-unregister-resource=
+
+The migration is per-fixture, not per-call: there is no per-key replacement for =mcp-server-lib-unregister-tool= or =mcp-server-lib-unregister-resource=. Pair each bundled =mcp-server-lib-register-server= with one =mcp-server-lib-unregister-server= (which tears down every entry the bundled call registered).
+
+The deprecated functions continue to work; references to them produce byte-compile warnings.
+
+The two API styles can be mixed during migration. =mcp-server-lib-unregister-server= tears down per-kind entries regardless of how they were registered, so it also clears tools and resources registered via the obsolete =mcp-server-lib-register-tool= / =mcp-server-lib-register-resource=. The per-server metadata record, however, is only created by =mcp-server-lib-register-server=; the per-key =mcp-server-lib-unregister-tool= / =mcp-server-lib-unregister-resource= do not touch it, so a per-key legacy unregister after a bundled register leaves the record (including any =:instructions=) in place until =mcp-server-lib-unregister-server= clears it.
 
 *** Resource Lists
 
@@ -301,7 +346,7 @@ For testing and debugging:
 (mcp-server-lib-create-resources-read-request uri &optional id)
 
 ;; Process requests and get parsed response
-(mcp-server-lib-process-jsonrpc-parsed request)
+(mcp-server-lib-process-jsonrpc-parsed request server-id)
 
 ;; Server management
 (mcp-server-lib-start)
@@ -335,12 +380,14 @@ Test helper functions use the dynamic variable =mcp-server-lib-ert-server-id= to
     (("tools/list" 1 0))
   ;; Code that should call tools/list once
   (mcp-server-lib-process-jsonrpc-parsed
-   (mcp-server-lib-create-tools-list-request)))
+   (mcp-server-lib-create-tools-list-request)
+   "example server"))
 
 ;; Simplified syntax for verifying successful single method calls
 (mcp-server-lib-ert-verify-req-success "tools/list"
   (mcp-server-lib-process-jsonrpc-parsed
-   (mcp-server-lib-create-tools-list-request)))
+   (mcp-server-lib-create-tools-list-request)
+   "example server"))
 
 ;; Process a request and get the successful result
 (let* ((request (mcp-server-lib-create-tools-list-request))
@@ -377,7 +424,8 @@ Test helper functions use the dynamic variable =mcp-server-lib-ert-server-id= to
   (let ((response (mcp-server-lib-process-jsonrpc-parsed
                    (json-encode '(("jsonrpc" . "2.0")
                                   ("method" . "tools/list")
-                                  ("id" . 1))))))
+                                  ("id" . 1)))
+                   "example server")))
     (should-not (alist-get 'error response))))
 #+end_src
 

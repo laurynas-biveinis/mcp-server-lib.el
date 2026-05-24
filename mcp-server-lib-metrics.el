@@ -1,9 +1,6 @@
 ;;; mcp-server-lib-metrics.el --- Metrics collection for MCP server -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 Laurynas Biveinis
-
-;; Version: 0.2.0
-;; Homepage: https://github.com/laurynas-biveinis/mcp.el
+;; Copyright (C) 2025-2026 Laurynas Biveinis
 
 ;; This file is part of mcp-server-lib.
 

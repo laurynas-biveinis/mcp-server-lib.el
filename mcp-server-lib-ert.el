@@ -1,10 +1,10 @@
 ;;; mcp-server-lib-ert.el --- ERT test utilities for MCP server -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 Laurynas Biveinis
+;; Copyright (C) 2025-2026 Laurynas Biveinis
 
 ;; Author: Laurynas Biveinis <laurynas.biveinis@gmail.com>
 ;; Keywords: tools, testing
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; URL: https://github.com/laurynas-biveinis/mcp-server-lib.el
 
 ;; This file is NOT part of GNU Emacs.
@@ -28,6 +28,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'ert)
 (require 'mcp-server-lib-metrics)
 (require 'mcp-server-lib-commands)
@@ -210,41 +211,55 @@ Returns the result field from the initialize response."
        (("protocolVersion" . ,mcp-server-lib-protocol-version)
         ("capabilities" . ,(make-hash-table))))))))
 
-(defun mcp-server-lib-ert-assert-initialize-result
-    (init-result tools resources)
-  "Assert the structure of an initialize result.
+(cl-defun
+ mcp-server-lib-ert-assert-initialize-result
+ (init-result tools resources &key instructions)
+ "Assert the structure of an initialize result.
 INIT-RESULT is the result from an initialize request.
 TOOLS is a boolean indicating if tools capability is expected.
 RESOURCES is a boolean indicating if resources capability is expected.
 
+Optional INSTRUCTIONS keyword (specified as `:instructions'):
+- omitted or nil: assert the `instructions' field is not present.
+- string: assert the `instructions' field equals that string.
+
 This function validates:
 - Protocol version matches the expected version
 - Server info contains the correct server name
-- Capabilities match the expected state for tools and resources"
-  (let ((protocol-version (alist-get 'protocolVersion init-result))
-        (capabilities (alist-get 'capabilities init-result))
-        (server-info (alist-get 'serverInfo init-result)))
-    (should
-     (string= mcp-server-lib-protocol-version protocol-version))
-    (should
-     (string= mcp-server-lib-name (alist-get 'name server-info)))
-    ;; Verify capabilities match expectations
-    (when tools
-      (should (assoc 'tools capabilities))
-      ;; Empty objects {} in JSON are parsed as nil in Elisp
-      (should-not (alist-get 'tools capabilities)))
-    (when resources
-      (should (assoc 'resources capabilities))
-      (should-not (alist-get 'resources capabilities)))
-    ;; Verify exact count
-    (should
-     (= (+ (if tools
-               1
-             0)
-           (if resources
-               1
-             0))
-        (length capabilities)))))
+- Capabilities match the expected state for tools and resources
+- The `instructions' field per :instructions"
+ (cl-check-type instructions (or null string))
+ (let ((protocol-version (alist-get 'protocolVersion init-result))
+       (capabilities (alist-get 'capabilities init-result))
+       (server-info (alist-get 'serverInfo init-result)))
+   (should (string= mcp-server-lib-protocol-version protocol-version))
+   (should
+    (string= mcp-server-lib-name (alist-get 'name server-info)))
+   ;; Verify capabilities match expectations
+   (when tools
+     (should (assoc 'tools capabilities))
+     ;; Empty objects {} in JSON are parsed as nil in Elisp
+     (should-not (alist-get 'tools capabilities)))
+   (when resources
+     (should (assoc 'resources capabilities))
+     (should-not (alist-get 'resources capabilities)))
+   ;; Verify exact count
+   (should
+    (= (+ (if tools
+              1
+            0)
+          (if resources
+              1
+            0))
+       (length capabilities)))
+   (cond
+    ((null instructions)
+     (should-not (assq 'instructions init-result)))
+    (t
+     (should (assq 'instructions init-result))
+     (should
+      (string=
+       instructions (alist-get 'instructions init-result)))))))
 
 (defun mcp-server-lib-ert-get-resource-list ()
   "Get the successful response to a \\='resources/list request.
@@ -290,40 +305,66 @@ Example:
     result))
 
 (cl-defmacro
- mcp-server-lib-ert-with-server
- (&rest body &key tools resources &allow-other-keys)
+ mcp-server-lib-ert-with-server (&rest body)
  "Run BODY with MCP server active and initialized.
 Starts the server, sends initialize request, then runs BODY.
-TOOLS and RESOURCES are booleans indicating expected capabilities.
+
+BODY may begin with any of the following keyword/value pairs, in any
+order, followed by the forms to execute:
+  :tools         Boolean; non-nil to expect tools capability
+  :resources     Boolean; non-nil to expect resources capability
+  :instructions  Optional; if a string, asserts the `instructions' field
+                 in the initialize result equals it; if omitted or nil,
+                 asserts the field is absent
 
 This macro:
 1. Starts the MCP server with `mcp-server-lib-start'
 2. Sends and validates the initialize request
 3. Sends the initialized notification
-4. Executes BODY
+4. Executes the remaining BODY forms
 5. Stops the server with `mcp-server-lib-stop'
 
-Arguments:
-  TOOLS - If non-nil, expects server to have tools capability
-  RESOURCES - If non-nil, expects server to have resources capability
-  BODY - Forms to execute with server running"
+Unknown keywords at the head of BODY, or a trailing keyword without a
+following value, signal an error at macro-expansion time."
  (declare (indent defun) (debug t))
- `(unwind-protect
-      (progn
-        (mcp-server-lib-start)
-        (mcp-server-lib-ert-assert-initialize-result
-         (mcp-server-lib-ert--get-initialize-result)
-         ,tools
-         ,resources)
-        ;; Send initialized notification - should return nil
-        (should-not
-         (mcp-server-lib-process-jsonrpc
-          (json-encode
-           '(("jsonrpc" . "2.0")
-             ("method" . "notifications/initialized")))
-          mcp-server-lib-ert-server-id))
-        ,@body)
-    (mcp-server-lib-stop)))
+ (let (tools
+       resources
+       instructions)
+   (while (and body (keywordp (car body)))
+     (unless (cdr body)
+       (error "Keyword %S has no value" (car body)))
+     (let ((key (car body))
+           (value (cadr body)))
+       (when (keywordp value)
+         (error "Keyword %S used as value for %S" value key))
+       (cond
+        ((eq key :tools)
+         (setq tools value))
+        ((eq key :resources)
+         (setq resources value))
+        ((eq key :instructions)
+         (setq instructions value))
+        (t
+         (error
+          "Unknown keyword %S; allowed: :tools, :resources, :instructions"
+          key)))
+       (setq body (cddr body))))
+   `(unwind-protect
+        (progn
+          (mcp-server-lib-start)
+          (mcp-server-lib-ert-assert-initialize-result
+           (mcp-server-lib-ert--get-initialize-result)
+           ,tools
+           ,resources
+           :instructions ,instructions)
+          (should-not
+           (mcp-server-lib-process-jsonrpc
+            (json-encode
+             '(("jsonrpc" . "2.0")
+               ("method" . "notifications/initialized")))
+            mcp-server-lib-ert-server-id))
+          ,@body)
+      (mcp-server-lib-stop))))
 
 (defun mcp-server-lib-ert-check-error-object
     (response expected-code expected-message)
