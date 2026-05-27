@@ -596,11 +596,24 @@ expected properties."
 
 (defun mcp-server-lib-test--emacs-error-message (error-symbol &rest data)
   "Return what `error-message-string' produces for (ERROR-SYMBOL DATA...).
-Use instead of hardcoding messages that depend on `text-quoting-style'
-or version-specific printed function reps.  For
-`wrong-number-of-arguments', pass `(symbol-function SYMBOL)' so the
-printed function rep matches what the runtime error contains."
+Use instead of hardcoding messages that depend on `text-quoting-style'.
+Do not use for `wrong-number-of-arguments': Emacs 29 and earlier strip
+the `closure' head from the signaled function value, so reconstructing
+the message from `symbol-function' does not match the runtime error.
+Use `mcp-server-lib-test--wrong-args-message' instead."
   (error-message-string (cons error-symbol data)))
+
+(defun mcp-server-lib-test--wrong-args-message (handler nargs)
+  "Return `error-message-string' for calling HANDLER with NARGS arguments.
+HANDLER must take an arity different from NARGS so the call signals
+`wrong-number-of-arguments'.  Capturing the actual signal yields the
+exact printed function representation the running Emacs produces; on
+Emacs 29 and earlier, `funcall_lambda' strips the `closure' head from
+the signaled function value, so reconstructing the message from
+`symbol-function' would not match."
+  (condition-case err
+      (apply handler (make-list nargs nil))
+    (wrong-number-of-arguments (error-message-string err))))
 
 (defun mcp-server-lib-test--check-jsonrpc-error
     (request expected-code expected-message)
@@ -4950,9 +4963,8 @@ form's `--build-resource-entry' code path."
     "test://123"
     mcp-server-lib-jsonrpc-error-internal
     (concat "Error reading resource test://123: "
-            (mcp-server-lib-test--emacs-error-message
-             'wrong-number-of-arguments
-             (symbol-function 'mcp-server-lib-test--return-string) 1)))))
+            (mcp-server-lib-test--wrong-args-message
+             #'mcp-server-lib-test--return-string 1)))))
 
 ;;; Multi-server isolation tests
 
