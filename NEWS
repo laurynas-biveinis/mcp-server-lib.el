@@ -1,6 +1,6 @@
 mcp-server-lib.el NEWS -- history of user-visible changes
 
-* Changes in mcp-server-lib 0.3.0 (unreleased)
+* Changes in mcp-server-lib 0.3.0 (2026-05-30)
 
 ** New Features
 
@@ -104,6 +104,10 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     This caused string= comparisons against multibyte Emacs strings to fail.
     The library now decodes incoming JSON strings to multibyte before parsing,
     fixing non-ASCII parameter handling for all transports.
+
+*** Fixed M-x mcp-server-lib-show-metrics not displaying its buffer
+    `mcp-server-lib-show-metrics' built the *MCP metrics* report but did
+    not pop it up; the command now displays the buffer.
 
 ** API Changes
 
