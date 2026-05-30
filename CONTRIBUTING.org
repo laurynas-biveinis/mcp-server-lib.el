@@ -15,6 +15,7 @@ The project follows [[https://semver.org/][Semantic Versioning]] (MAJOR.MINOR.PA
 2. [ ] NEWS file is up to date with all changes
 3. [ ] Version numbers are updated in:
    - ~mcp-server-lib.el~ (Version header)
+   - ~mcp-server-lib-ert.el~ (Version header)
    - ~Eask~ file (version field)
 4. [ ] Documentation reflects any new features or changes
 5. [ ] No uncommitted changes in working directory
@@ -59,28 +60,31 @@ The project follows [[https://semver.org/][Semantic Versioning]] (MAJOR.MINOR.PA
      --notes "..."
    #+end_src
 
-7. *Prepare for next development cycle*:
-   - Add new section to NEWS:
-     #+begin_example
-     * X.Y+1.0 (unreleased)
-
-     ** New features
-
-     ** Bug fixes
-
-     #+end_example
-   - Commit:
-     #+begin_src shell
-     git add NEWS
-     git commit -m "Start X.Y+1.0 development"
-     git push origin main
-     #+end_src
-
-8. *Restore environment*:
+7. *Restore environment*:
    #+begin_src shell
    # Restore ELPA installation
    mv /tmp/mcp-server-lib-* ~/.emacs.d/elpa/
    #+end_src
+
+** Next Development Cycle
+
+The next version is *not* opened at release time. Instead, the first
+post-release fix or feature lazily sets up the new cycle as part of its own
+commit:
+
+- Bump the version in ~mcp-server-lib.el~, ~mcp-server-lib-ert.el~, and ~Eask~.
+- Add a new top section to NEWS:
+  #+begin_example
+  * Changes in mcp-server-lib X.Y+1.0 (unreleased)
+
+  ** New Features
+
+  ** Bug Fixes
+
+  #+end_example
+
+This keeps releases clean (no empty "Start X.Y+1.0 development" commits) and
+avoids guessing the next version number before there is any change to ship.
 
 ** Post-Release Verification
 
