@@ -31,6 +31,25 @@
 (require 'mcp-server-lib-ert)
 (require 'json)
 
+;;; Test helpers
+
+(defun mcp-server-lib-test--register-server (&rest properties)
+  "Call `mcp-server-lib-register-server', pinning :version for tests.
+Most tests care only that registration succeeds, not about the server
+:version.  When PROPERTIES omits :version, supply
+`mcp-server-lib-ert-default-version' -- a fixed value the `initialize'
+assertion helper also expects by default -- so test servers report a
+deterministic version decoupled from the library default
+`mcp-server-lib-default-server-version'.  PROPERTIES is otherwise
+passed through unchanged, so validation and ref-count behavior are
+exercised exactly as for a direct call."
+  (unless (plist-member properties :version)
+    (setq properties
+          (append
+           properties
+           (list :version mcp-server-lib-ert-default-version))))
+  (apply #'mcp-server-lib-register-server properties))
+
 ;;; Test data
 
 (defconst mcp-server-lib-test--string-list-result "item1 item2 item3"
@@ -495,7 +514,7 @@ PLIST-AND-BODY is the keyword arguments of
       `(let ((,id-var ,id-form))
          (unwind-protect
              (progn
-               (mcp-server-lib-register-server :id ,id-var ,@plist)
+               (mcp-server-lib-test--register-server :id ,id-var ,@plist)
                (let ((mcp-server-lib-ert-server-id ,id-var))
                  ,@body))
            (mcp-server-lib-unregister-server ,id-var))))))
@@ -1560,9 +1579,103 @@ that t means the tool was found."
 
 ;;; `mcp-server-lib-register-server' tests
 
-(ert-deftest mcp-server-lib-test-initialize-without-register-server-omits-instructions ()
-  "When register-server was never called, initialize omits `instructions'."
-  (mcp-server-lib-ert-with-server :tools nil :resources nil))
+(ert-deftest mcp-server-lib-test-register-server-serverinfo-name-and-version ()
+  "initialize serverInfo reports the registered :name and :version.
+The :version is the server's own version, distinct from the MCP
+`protocolVersion' (which the assertion checks separately)."
+  (mcp-server-lib-test--with-server
+    :id "srv" :name "My Server" :version "2.5.0"
+    (mcp-server-lib-ert-with-server
+      :tools nil
+      :resources nil
+      :name "My Server"
+      :version "2.5.0")))
+
+(ert-deftest
+    mcp-server-lib-test-register-server-serverinfo-name-defaults-to-id
+    ()
+  "Without :name, serverInfo.name defaults to the server :id."
+  (mcp-server-lib-test--with-server
+    :id "srv-id-as-name" :version "1.2.3"
+    (mcp-server-lib-ert-with-server
+      :tools nil
+      :resources nil
+      :name "srv-id-as-name"
+      :version "1.2.3")))
+
+(ert-deftest mcp-server-lib-test-register-server-version-defaults ()
+  "Without :version, serverInfo.version defaults to the library default.
+Calls `mcp-server-lib-register-server' directly (not the version-
+defaulting test wrapper) so the library default is exercised."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-server :id "default")
+        (mcp-server-lib-ert-with-server
+          :tools nil
+          :resources nil
+          :version mcp-server-lib-default-server-version))
+    (mcp-server-lib-unregister-server "default")))
+
+(ert-deftest
+    mcp-server-lib-test-initialize-legacy-only-serverinfo-defaults
+    ()
+  "Legacy-only registration still yields non-null serverInfo name/version.
+A server configured purely through the obsolete
+`mcp-server-lib-register-tool' has no bundled metadata record, yet
+`initialize' must report the server-id as the name and the default
+version -- never JSON null.  Also pins the documented
+`mcp-server-lib-server-registered-p' contract that a legacy-only server
+has no record and so reports as not registered."
+  (with-suppressed-warnings ((obsolete mcp-server-lib-register-tool))
+    (let ((mcp-server-lib-ert-server-id "legacy-only-srv"))
+      (unwind-protect
+          (progn
+            (mcp-server-lib-register-tool
+             #'mcp-server-lib-test--return-string
+             :id "legacy-tool"
+             :description "Tool via obsolete shim"
+             :server-id "legacy-only-srv")
+            (should-not
+             (mcp-server-lib-server-registered-p "legacy-only-srv"))
+            (unwind-protect
+                (progn
+                  (mcp-server-lib-start)
+                  (mcp-server-lib-ert-assert-initialize-result
+                   (mcp-server-lib-ert--get-initialize-result)
+                   t nil
+                   :name "legacy-only-srv"
+                   :version mcp-server-lib-default-server-version))
+              (mcp-server-lib-stop)))
+        (mcp-server-lib-unregister-server "legacy-only-srv")))))
+
+(ert-deftest mcp-server-lib-test-server-registered-p ()
+  "`mcp-server-lib-server-registered-p' reflects the server record lifecycle.
+Returns nil before registration and after teardown, non-nil while a
+record registered via `mcp-server-lib-register-server' is live."
+  (unwind-protect
+      (progn
+        (should-not (mcp-server-lib-server-registered-p "reg-p-srv"))
+        (mcp-server-lib-register-server :id "reg-p-srv")
+        (should (mcp-server-lib-server-registered-p "reg-p-srv"))
+        (mcp-server-lib-unregister-server "reg-p-srv")
+        (should-not (mcp-server-lib-server-registered-p "reg-p-srv")))
+    (mcp-server-lib-unregister-server "reg-p-srv")))
+
+(ert-deftest
+    mcp-server-lib-test-register-server-non-string-version-rejected
+    ()
+  "Non-string :version signals an error."
+  (should-error
+   (mcp-server-lib-register-server :id "bad-version" :version 42)
+   :type 'error))
+
+(ert-deftest mcp-server-lib-test-register-server-non-string-name-rejected
+    ()
+  "Non-string :name signals an error."
+  (should-error
+   (mcp-server-lib-register-server
+    :id "bad-name" :name 42 :version "1.0.0")
+   :type 'error))
 
 (ert-deftest mcp-server-lib-test-register-server-emits-instructions ()
   "register-server :instructions causes initialize to include the field."
@@ -1589,6 +1702,15 @@ that t means the tool was found."
     :id "default"
     (mcp-server-lib-ert-with-server :tools nil :resources nil)))
 
+(ert-deftest mcp-server-lib-test-ert-with-server-auto-register-forwards-instructions ()
+  "`mcp-server-lib-ert-with-server' auto-registration forwards :instructions.
+A caller that supplies :instructions without pre-registering a server still
+sees the field in the initialize result."
+  (mcp-server-lib-ert-with-server
+    :tools nil
+    :resources nil
+    :instructions "Auto-registered instructions."))
+
 (ert-deftest
     mcp-server-lib-test-register-server-empty-call-requires-paired-unregister
     ()
@@ -1600,8 +1722,8 @@ the instructions visible (record at ref-count 1) and a second unregister
 removes them (record gone)."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server)
-        (mcp-server-lib-register-server :instructions "Persisted.")
+        (mcp-server-lib-test--register-server)
+        (mcp-server-lib-test--register-server :instructions "Persisted.")
         ;; Ref-count 2 -> 1: record still alive, instructions visible.
         (mcp-server-lib-unregister-server "default")
         (mcp-server-lib-ert-with-server
@@ -1657,7 +1779,7 @@ Then run `with-server' to verify no record leaked into the per-server
 table on the failed registration; the macro asserts `instructions'
 absent in the `initialize' response by default."
   (should-error
-   (mcp-server-lib-register-server :instructions value)
+   (mcp-server-lib-test--register-server :instructions value)
    :type 'error)
   (mcp-server-lib-ert-with-server :tools nil :resources nil))
 
@@ -1683,7 +1805,7 @@ absent in the `initialize' response by default."
   "Bundle with empty :tools and :resources registers nothing."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default" :tools '() :resources '())
         (mcp-server-lib-ert-with-server :tools nil :resources nil
           (mcp-server-lib-test--verify-list-counts "default" 0 0 0)))
@@ -1693,7 +1815,7 @@ absent in the `initialize' response by default."
   "Bundled :tools registers tools that appear in tools/list."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :tools
          '((mcp-server-lib-test--return-string
@@ -1712,7 +1834,7 @@ absent in the `initialize' response by default."
   "Bundled :resources registers direct (non-template) resources."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :resources
          '(("test://r1" mcp-server-lib-test--return-string
@@ -1727,7 +1849,7 @@ absent in the `initialize' response by default."
   "Bundled :resources auto-detects template URIs."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :resources
          '(("test://{var}" mcp-server-lib-test--return-string
@@ -1743,13 +1865,13 @@ absent in the `initialize' response by default."
 Each server-id sees only the tools registered under it."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "server-a"
          :tools
          '((mcp-server-lib-test--return-string
             :id "tool-a"
             :description "Tool A")))
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "server-b"
          :tools
          '((mcp-server-lib-test--return-string
@@ -1779,7 +1901,7 @@ Each server-id sees only the tools registered under it."
   "Bundled :tools and :resources both register together."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :tools
          '((mcp-server-lib-test--return-string
@@ -1797,7 +1919,7 @@ Each server-id sees only the tools registered under it."
 (ert-deftest mcp-server-lib-test-register-server-atomicity ()
   "Invalid spec in :tools aborts the call; no state is mutated."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -1814,7 +1936,7 @@ Each server-id sees only the tools registered under it."
 (ert-deftest mcp-server-lib-test-register-server-atomicity-resources ()
   "Invalid spec in :resources aborts the call; no state is mutated."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :resources
     '(("test://valid" mcp-server-lib-test--return-string
@@ -1830,7 +1952,7 @@ Each server-id sees only the tools registered under it."
 Verifies the all-validation-before-any-apply ordering across both lists:
 neither tools nor resources are partially registered."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -1857,7 +1979,7 @@ that allows schema-error to leak past the entry-building phase (e.g.
 for performance) will fail this test instead of silently breaking
 atomicity for the schema-error branch."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -1880,7 +2002,7 @@ only inside `mcp-server-lib--parse-uri-template', which is called from
 `mcp-server-lib--build-resource-entry' before any state mutation.  The
 earlier valid resource must NOT be registered."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :resources
     '(("test://valid" mcp-server-lib-test--return-string
@@ -1911,10 +2033,10 @@ ref-count 1 and stay listed."
            :resources
            (("test://prior" mcp-server-lib-test--return-string
              :name "Prior resource")))))
-    (apply #'mcp-server-lib-register-server prior-bundle)
+    (apply #'mcp-server-lib-test--register-server prior-bundle)
     ;; Failing call that tries to update everything.
     (should-error
-     (mcp-server-lib-register-server
+     (mcp-server-lib-test--register-server
       :id "default"
       :instructions "New instructions that should not stick."
       :tools
@@ -1933,7 +2055,7 @@ ref-count 1 and stay listed."
     ;; unregister-server calls then bring them to 0; any bump
     ;; introduced by the failing call would leave the corresponding
     ;; entry at ref-count 1 and still listed.
-    (apply #'mcp-server-lib-register-server prior-bundle)
+    (apply #'mcp-server-lib-test--register-server prior-bundle)
     (mcp-server-lib-unregister-server "default")
     (mcp-server-lib-unregister-server "default")
     (mcp-server-lib-ert-with-server :tools nil :resources nil
@@ -1958,9 +2080,9 @@ below at ref-count 1 and stay listed."
            :resources
            (("test://prior" mcp-server-lib-test--return-string
              :name "Prior resource")))))
-    (apply #'mcp-server-lib-register-server prior-bundle)
+    (apply #'mcp-server-lib-test--register-server prior-bundle)
     (should-error
-     (mcp-server-lib-register-server
+     (mcp-server-lib-test--register-server
       :id "default"
       :instructions "New instructions that should not stick."
       :resources
@@ -1974,7 +2096,7 @@ below at ref-count 1 and stay listed."
       :resources t
       :instructions "Prior instructions."
       (mcp-server-lib-test--verify-list-counts "default" 1 1 0))
-    (apply #'mcp-server-lib-register-server prior-bundle)
+    (apply #'mcp-server-lib-test--register-server prior-bundle)
     (mcp-server-lib-unregister-server "default")
     (mcp-server-lib-unregister-server "default")
     (mcp-server-lib-ert-with-server :tools nil :resources nil
@@ -1990,10 +2112,10 @@ torn down (initialize must omit `instructions').  A regression that
 bumps the record's ref-count during the failing call would leave the
 record at ref-count 1, and initialize would still emit the prior
 `:instructions' value."
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "default" :instructions "Sticky.")
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '(("not-a-function"
@@ -2015,7 +2137,7 @@ The bundled API has no per-entry server-id; the outer :id of
 register-server applies to all entries.  :server-id is rejected via
 the same generic unknown-property path as any other unaccepted key."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -2029,7 +2151,7 @@ the same generic unknown-property path as any other unaccepted key."
     ()
   "Tool spec containing an unknown property key is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -2043,7 +2165,7 @@ the same generic unknown-property path as any other unaccepted key."
     ()
   "Tool spec with non-boolean :read-only value is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -2060,7 +2182,7 @@ The bundled API has no per-entry server-id; the outer :id of
 register-server applies to all entries.  :server-id is rejected via
 the same generic unknown-property path as any other unaccepted key."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :resources
     '(("test://r" mcp-server-lib-test--return-string
@@ -2073,7 +2195,7 @@ the same generic unknown-property path as any other unaccepted key."
     ()
   "Resource spec containing an unknown property key is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :resources
     '(("test://r" mcp-server-lib-test--return-string
@@ -2086,7 +2208,7 @@ the same generic unknown-property path as any other unaccepted key."
     ()
   "Unknown top-level property in `mcp-server-lib-register-server' is rejected."
   (should-error
-   (mcp-server-lib-register-server :id "default" :isntructions "typo")
+   (mcp-server-lib-test--register-server :id "default" :isntructions "typo")
    :type 'error))
 
 (ert-deftest
@@ -2126,7 +2248,7 @@ rejected at macro-expansion time."
 The bundled API uses `:id'; `:server-id' is rejected via the same
 generic unknown-property path as any other unaccepted key."
   (should-error
-   (mcp-server-lib-register-server :server-id "x")
+   (mcp-server-lib-test--register-server :server-id "x")
    :type 'error))
 
 (ert-deftest
@@ -2137,7 +2259,7 @@ A trailing key with no value (e.g. `:read-only' missing the value)
 would otherwise silently register `:read-only nil', the opposite of
 the user's likely intent."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -2151,7 +2273,7 @@ the user's likely intent."
     ()
   "Tool spec with duplicate property key is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -2169,7 +2291,7 @@ validator must surface a contextual `proper list' error message
 instead."
   (let ((err
          (should-error
-          (mcp-server-lib-register-server
+          (mcp-server-lib-test--register-server
            :id "default"
            :tools
            '((mcp-server-lib-test--return-string
@@ -2186,7 +2308,7 @@ instead."
     ()
   "Resource spec with odd-length property list is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :resources
     '(("test://r" mcp-server-lib-test--return-string
@@ -2199,7 +2321,7 @@ instead."
     ()
   "Resource spec with duplicate property key is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :resources
     '(("test://r" mcp-server-lib-test--return-string
@@ -2213,7 +2335,7 @@ instead."
   "Resource spec with improper (dotted) property list is rejected."
   (let ((err
          (should-error
-          (mcp-server-lib-register-server
+          (mcp-server-lib-test--register-server
            :id "default"
            :resources
            '(("test://r" mcp-server-lib-test--return-string
@@ -2249,7 +2371,7 @@ second value (`plist-get' returns the first match)."
     ()
   "Two tool specs with the same :id are rejected in validation."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :tools
     '((mcp-server-lib-test--return-string
@@ -2265,7 +2387,7 @@ second value (`plist-get' returns the first match)."
     ()
   "Two resource specs with the same URI are rejected in validation."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default"
     :resources
     '(("test://r" mcp-server-lib-test--return-string
@@ -2277,7 +2399,7 @@ second value (`plist-get' returns the first match)."
 (ert-deftest mcp-server-lib-test-register-server-tools-not-list-rejected ()
   ":tools that isn't a list is rejected."
   (should-error
-   (mcp-server-lib-register-server :id "default" :tools "not-a-list")
+   (mcp-server-lib-test--register-server :id "default" :tools "not-a-list")
    :type 'error))
 
 (ert-deftest
@@ -2286,7 +2408,7 @@ second value (`plist-get' returns the first match)."
   ":tools that is a dotted (improper) list is rejected with a contextual error."
   (let ((err
          (should-error
-          (mcp-server-lib-register-server
+          (mcp-server-lib-test--register-server
            :id "default"
            :tools '((mcp-server-lib-test--return-string
                      :id "a"
@@ -2302,7 +2424,7 @@ second value (`plist-get' returns the first match)."
     ()
   ":resources that isn't a list is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default" :resources "not-a-list")
    :type 'error))
 
@@ -2312,7 +2434,7 @@ second value (`plist-get' returns the first match)."
   ":resources that is a dotted (improper) list is rejected with a contextual error."
   (let ((err
          (should-error
-          (mcp-server-lib-register-server
+          (mcp-server-lib-test--register-server
            :id "default"
            :resources '(("test://r" mcp-server-lib-test--return-string
                          :name "R")
@@ -2325,7 +2447,7 @@ second value (`plist-get' returns the first match)."
 (ert-deftest mcp-server-lib-test-register-server-non-string-id-rejected ()
   ":id that isn't a string is rejected."
   (should-error
-   (mcp-server-lib-register-server :id 42)
+   (mcp-server-lib-test--register-server :id 42)
    :type 'error))
 
 (ert-deftest
@@ -2333,7 +2455,7 @@ second value (`plist-get' returns the first match)."
     ()
   "An entry in :tools that isn't a cons cell is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default" :tools '(nil))
    :type 'error))
 
@@ -2342,7 +2464,7 @@ second value (`plist-get' returns the first match)."
     ()
   "An entry in :resources that isn't a `(URI HANDLER . PROPS)' list is rejected."
   (should-error
-   (mcp-server-lib-register-server
+   (mcp-server-lib-test--register-server
     :id "default" :resources '(nil))
    :type 'error))
 
@@ -2356,8 +2478,8 @@ second value (`plist-get' returns the first match)."
              :description "Shared tool")))))
     (unwind-protect
         (progn
-          (apply #'mcp-server-lib-register-server bundle)
-          (apply #'mcp-server-lib-register-server bundle)
+          (apply #'mcp-server-lib-test--register-server bundle)
+          (apply #'mcp-server-lib-test--register-server bundle)
           (mcp-server-lib-ert-with-server :tools t :resources nil
             (let ((mcp-server-lib-ert-server-id "default"))
               (should
@@ -2382,13 +2504,13 @@ bumped).  Pins the documented \"first wins\" semantic for
 `mcp-server-lib-register-server'."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :tools
          '((mcp-server-lib-test--return-string
             :id "shared-tool"
             :description "First description")))
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :tools
          '((mcp-server-lib-test--return-alternate-string
@@ -2418,12 +2540,12 @@ is bumped).  Pins the documented \"first wins\" semantic for
 `mcp-server-lib-register-server'."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :resources
          '(("shared://uri" mcp-server-lib-test--return-string
             :name "First Name")))
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :resources
          '(("shared://uri" mcp-server-lib-test--return-alternate-string
@@ -2447,10 +2569,10 @@ is bumped).  Pins the documented \"first wins\" semantic for
   "Second `register-server' call without :instructions preserves prior value."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default" :instructions "First call's instructions.")
         ;; Second call only adds a tool, does not mention :instructions.
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2469,9 +2591,9 @@ is bumped).  Pins the documented \"first wins\" semantic for
   "Explicit `:instructions nil' clears a previously-set value."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default" :instructions "Will be cleared.")
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default" :instructions nil)
         (mcp-server-lib-ert-with-server :tools nil :resources nil))
     (mcp-server-lib-unregister-server "default")
@@ -2492,8 +2614,8 @@ second `unregister-server' fully tears down."
            ((mcp-server-lib-test--return-string
              :id "shared"
              :description "Shared tool")))))
-    (apply #'mcp-server-lib-register-server bundle)
-    (apply #'mcp-server-lib-register-server bundle)
+    (apply #'mcp-server-lib-test--register-server bundle)
+    (apply #'mcp-server-lib-test--register-server bundle)
     ;; After one unregister: tool still listed AND instructions
     ;; still emitted.
     (mcp-server-lib-unregister-server "default")
@@ -2516,9 +2638,9 @@ second `unregister-server' fully tears down."
 Two registers with different values leave the most-recent value in the
 record; a single `unregister-server' decrements the count but does not
 roll the value back to the prior writer's string."
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "default" :instructions "First.")
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "default" :instructions "Second.")
   (mcp-server-lib-unregister-server "default")
   ;; Value is still "Second.", not reverted to "First.".
@@ -2541,9 +2663,9 @@ metadata record was at ref-count 2 so it stays with `:instructions'
 intact."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default" :instructions "Sticky.")
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "default"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2561,13 +2683,39 @@ intact."
     (mcp-server-lib-unregister-server "default")))
 
 (ert-deftest
+    mcp-server-lib-test-register-server-name-version-preserved-across-tool-only-call
+    ()
+  "Name/version persist through a later register-server with no :name/:version.
+Calls `mcp-server-lib-register-server' directly (not the version-
+defaulting test wrapper) so an omitted :version is genuinely absent.
+Mirrors the `:instructions' preserve-on-omit contract: a tool-only
+re-registration must not reset :name/:version to the id/default."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-register-server
+         :id "default" :name "Custom Name" :version "2.5.0")
+        (mcp-server-lib-register-server
+         :id "default"
+         :tools
+         '((mcp-server-lib-test--return-string
+            :id "later-tool"
+            :description "Tool added by a later call")))
+        (mcp-server-lib-ert-with-server
+          :tools t
+          :resources nil
+          :name "Custom Name"
+          :version "2.5.0"))
+    (mcp-server-lib-unregister-server "default")
+    (mcp-server-lib-unregister-server "default")))
+
+(ert-deftest
     mcp-server-lib-test-register-server-instructions-only-call-does-not-bump-entries
     ()
   "An `:instructions'-only register-server call does not bump tool or
 resource ref counts.  Tools and resources registered in call 1 remain
 at ref-count 1; a single `unregister-server' fully tears them down
 while leaving the metadata record alive at ref-count 1."
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "default"
    :tools
    '((mcp-server-lib-test--return-string
@@ -2577,7 +2725,7 @@ while leaving the metadata record alive at ref-count 1."
    '(("test://r1"
       mcp-server-lib-test--return-string
       :name "Resource 1")))
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "default" :instructions "Adds instructions only.")
   ;; After both calls: tool/resource at ref=1, record at ref=2.
   (mcp-server-lib-test--with-servers
@@ -2604,7 +2752,7 @@ while leaving the metadata record alive at ref-count 1."
   "Test bulk unregister removes tool, resource, and template for a server-id."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "server-a"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2633,7 +2781,7 @@ laxness against future tightening refactors."
 Black-box assertion only: this verifies the observable contract, not
 whether the per-server record was removed via `remhash' or merely
 nil-cleared.  Both implementations would satisfy this test."
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "default" :instructions "Will be dropped.")
   (mcp-server-lib-unregister-server "default")
   (mcp-server-lib-ert-with-server :tools nil :resources nil))
@@ -2643,7 +2791,7 @@ nil-cleared.  Both implementations would satisfy this test."
   "Test bulk unregister leaves other server-ids' registrations intact."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "server-a"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2654,7 +2802,7 @@ nil-cleared.  Both implementations would satisfy this test."
             :name "Resource A")
            ("test://a/{var}" mcp-server-lib-test--return-string
             :name "Template A")))
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "server-b"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2678,18 +2826,18 @@ nil-cleared.  Both implementations would satisfy this test."
     mcp-server-lib-test-unregister-server-cross-server-instructions-isolation
     ()
   "Unregistering one server-id leaves another server-id's `:instructions' intact."
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "server-a" :instructions "Instructions for A.")
-  (mcp-server-lib-register-server
+  (mcp-server-lib-test--register-server
    :id "server-b" :instructions "Instructions for B.")
   (unwind-protect
       (progn
         ;; Tear down only server-a's record.
         (mcp-server-lib-unregister-server "server-a")
-        ;; server-a now omits `instructions'; server-b's record survives.
+        ;; server-b's record (and its instructions) survives server-a's
+        ;; teardown.
         (mcp-server-lib-test--with-servers
-         '(("server-a" :tools nil :resources nil)
-           ("server-b"
+         '(("server-b"
             :tools nil :resources nil
             :instructions "Instructions for B."))))
     (mcp-server-lib-unregister-server "server-b")))
@@ -2706,8 +2854,8 @@ leaves ref-count 1 (tool still listed); a second call removes it."
              :description "Shared tool")))))
     (unwind-protect
         (progn
-          (apply #'mcp-server-lib-register-server spec)
-          (apply #'mcp-server-lib-register-server spec)
+          (apply #'mcp-server-lib-test--register-server spec)
+          (apply #'mcp-server-lib-test--register-server spec)
           (mcp-server-lib-test--with-servers
               '(("ref-count-test" :tools t :resources nil))
             (let ((mcp-server-lib-ert-server-id "ref-count-test"))
@@ -2729,7 +2877,7 @@ under the same server-id: one bulk-unregister removes A (was 1) and
 leaves B with ref-count 1; a second call removes B."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "mixed-ref"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2739,7 +2887,7 @@ leaves B with ref-count 1; a second call removes B."
             :id "tool-b"
             :description "Tool B")))
         ;; Second call registers tool-b again to bump its ref-count to 2.
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "mixed-ref"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2776,8 +2924,8 @@ ref-count 1 (still listed); a second call removes them."
              :name "Shared Template")))))
     (unwind-protect
         (progn
-          (apply #'mcp-server-lib-register-server spec)
-          (apply #'mcp-server-lib-register-server spec)
+          (apply #'mcp-server-lib-test--register-server spec)
+          (apply #'mcp-server-lib-test--register-server spec)
           (mcp-server-lib-test--with-servers
               '(("ref-count-resources" :tools nil :resources t))
             (mcp-server-lib-test--verify-list-counts
@@ -2795,7 +2943,7 @@ ref-count 1 (still listed); a second call removes them."
   "Test bulk unregister handles multiple entries across all three types."
   (unwind-protect
       (progn
-        (mcp-server-lib-register-server
+        (mcp-server-lib-test--register-server
          :id "mixed-server"
          :tools
          '((mcp-server-lib-test--return-string
@@ -2833,6 +2981,9 @@ Pins the README \"two API styles can be mixed\" contract: legacy
            :id "legacy-tool"
            :description "Tool via obsolete shim"
            :server-id "legacy-srv")
+          ;; A bundled record gives the server its initialize identity;
+          ;; the legacy tool lives alongside it (the "mixed" contract).
+          (mcp-server-lib-test--register-server :id "legacy-srv")
           (mcp-server-lib-test--with-servers
               '(("legacy-srv" :tools t :resources nil))
             (mcp-server-lib-test--verify-list-counts "legacy-srv" 1 0 0)
@@ -2853,6 +3004,9 @@ Pins the README \"two API styles can be mixed\" contract: legacy
            #'mcp-server-lib-test--return-string
            :name "Legacy resource"
            :server-id "legacy-srv")
+          ;; A bundled record gives the server its initialize identity;
+          ;; the legacy resource lives alongside it (the "mixed" contract).
+          (mcp-server-lib-test--register-server :id "legacy-srv")
           (mcp-server-lib-test--with-servers
               '(("legacy-srv" :tools nil :resources t))
             (mcp-server-lib-test--verify-list-counts "legacy-srv" 0 1 0)
@@ -3666,10 +3820,16 @@ optional parameters are provided."
          mcp-server-lib-test--describe-setup-comprehensive-regexp)))))
 
 (ert-deftest mcp-server-lib-test-describe-setup-empty-state ()
-  "Test that describe-setup handles empty state correctly."
-  (mcp-server-lib-ert-with-server :tools nil :resources nil
-    (mcp-server-lib-test--do-describe-setup-test
-     mcp-server-lib-test--describe-setup-empty-regexp)))
+  "Test that describe-setup handles empty state correctly.
+Uses `mcp-server-lib-start' directly rather than
+`mcp-server-lib-ert-with-server', whose initialize handshake would
+register a server and so make the state non-empty."
+  (unwind-protect
+      (progn
+        (mcp-server-lib-start)
+        (mcp-server-lib-test--do-describe-setup-test
+         mcp-server-lib-test--describe-setup-empty-regexp))
+    (mcp-server-lib-stop)))
 
 (ert-deftest mcp-server-lib-test-describe-setup-nil-metrics ()
   "Test that describe-setup handles nil metrics correctly."
@@ -4418,7 +4578,7 @@ Routes through `mcp-server-lib-register-server' to exercise the bundled
 form's `--build-resource-entry' code path."
   (mcp-server-lib-ert-with-server :tools nil :resources nil
    (should-error
-    (mcp-server-lib-register-server
+    (mcp-server-lib-test--register-server
      :id "default"
      :resources
      `((,uri

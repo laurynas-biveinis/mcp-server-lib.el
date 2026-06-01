@@ -1,5 +1,47 @@
 mcp-server-lib.el NEWS -- history of user-visible changes
 
+* Changes in mcp-server-lib 0.4.0 (unreleased)
+
+** Breaking Changes
+
+*** `initialize' serverInfo now reports the server's own name and version
+    Previously the `initialize' result's `serverInfo' was hardcoded to
+    the library's name and, incorrectly, to the MCP protocol version
+    (e.g. "2025-03-26") as the server version.  Per the MCP spec
+    `serverInfo' describes the server implementation, so its name and
+    version are now supplied by the consuming server at registration and
+    reported as-is, while `protocolVersion' continues to report the MCP
+    protocol version.
+
+*** `mcp-server-lib-name' is obsolete
+    The server name is now supplied per server via `:name'.
+
+** New Features
+
+*** `mcp-server-lib-register-server' gained `:name' and `:version'
+    Both optional.  `:name' sets `serverInfo.name' and defaults to the
+    server `:id'.  `:version' sets `serverInfo.version' (the server's
+    own version, distinct from the protocol version) and defaults to the
+    new constant `mcp-server-lib-default-server-version' ("1.0.0").
+
+*** `mcp-server-lib-server-registered-p' predicate
+    New function: returns non-nil when a server record has been
+    registered under a given server-id via
+    `mcp-server-lib-register-server'.
+
+** ERT Test Helpers
+
+*** `mcp-server-lib-ert-assert-initialize-result' gained `:name'/`:version'
+    They assert `serverInfo.name'/`serverInfo.version'; they default to
+    `mcp-server-lib-ert-server-id' and the new constant
+    `mcp-server-lib-ert-default-version' respectively.
+
+*** `mcp-server-lib-ert-with-server' gained `:name'/`:version'
+    It now also registers a minimal server under
+    `mcp-server-lib-ert-server-id' when none is registered, so the
+    `initialize' handshake reports a serverInfo; an already-registered
+    server is left untouched.
+
 * Changes in mcp-server-lib 0.3.0 (2026-05-30)
 
 ** New Features

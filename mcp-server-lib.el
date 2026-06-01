@@ -4,7 +4,7 @@
 
 ;; Author: Laurynas Biveinis <laurynas.biveinis@gmail.com>
 ;; Keywords: comm, tools
-;; Version: 0.3.0
+;; Version: 0.4.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; URL: https://github.com/laurynas-biveinis/mcp-server-lib.el
 
@@ -74,9 +74,21 @@ Defaults to `user-emacs-directory' but can be customized."
 
 (defconst mcp-server-lib-name "emacs-mcp-server-lib"
   "Name of the MCP server.")
+(make-obsolete-variable
+ 'mcp-server-lib-name
+ "the server name is supplied per server via the :name property of \
+`mcp-server-lib-register-server' and reported in the `initialize' \
+result's serverInfo."
+ "0.4.0")
 
 (defconst mcp-server-lib-protocol-version "2025-03-26"
   "Current MCP protocol version supported by this server.")
+
+(defconst mcp-server-lib-default-server-version "1.0.0"
+  "Default value for a server's `:version' when registration omits it.
+Reported as `serverInfo.version' in the MCP `initialize' result.  This
+is the server implementation's own version, distinct from
+`mcp-server-lib-protocol-version'.")
 
 ;;; Public API - JSON-RPC 2.0 Error Codes
 
@@ -392,7 +404,7 @@ TABLE; both preconditions are enforced by `cl-assert'."
 ENTRY is consumed only when KEY is absent from TABLE; otherwise the
 existing entry's `:ref-count' is incremented in place."
   (if-let* ((existing (gethash key table)))
-      (mcp-server-lib--bump-ref-count existing)
+    (mcp-server-lib--bump-ref-count existing)
     (mcp-server-lib--register-new key entry table)))
 
 (defun mcp-server-lib--ref-counted-unregister (key table)
@@ -463,8 +475,8 @@ typos like a trailing key with no value, or a dotted property tail).
 Duplicate keys are also rejected (catches typos like a property
 re-added without removing the old one)."
   (if-let* ((len (proper-list-p properties)))
-      (unless (zerop (mod len 2))
-        (error "%s: property list has odd length" entity))
+    (unless (zerop (mod len 2))
+      (error "%s: property list has odd length" entity))
     (error "%s: property list must be a proper list" entity))
   (let ((p properties)
         seen)
@@ -747,43 +759,43 @@ Supports RFC 6570 simple variables {var} and reserved expansion {+var}."
     ;; Process template character by character
     (while (< pos len)
       (if-let* ((var-start (string-match "{" template pos)))
-          ;; Found variable start
-          (progn
-            ;; Add literal segment before variable if any
-            (when (> var-start pos)
-              (push (list
-                     :type 'literal
-                     :value (substring template pos var-start))
-                    segments))
-            ;; Find variable end (guaranteed to exist due to balance check)
-            (let* ((var-end (string-match "}" template var-start))
-                   ;; Extract variable content
-                   (var-content
-                    (substring template (1+ var-start) var-end))
-                   (reserved
-                    (and (> (length var-content) 0)
-                         (eq (aref var-content 0) ?+)))
-                   (var-name
-                    (if reserved
-                        (substring var-content 1)
-                      var-content)))
-              ;; Validate variable name
-              ;; RFC 6570: Variable names must start with ALPHA / "_"
-              ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
-              (unless (string-match-p
-                       "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
-                (error
-                 "Invalid variable name '%s' in resource template: %s"
-                 var-name
-                 template))
-              ;; Add variable segment
-              (push (list
-                     :type 'variable
-                     :name var-name
-                     :reserved reserved)
-                    segments)
-              (push var-name variables)
-              (setq pos (1+ var-end))))
+        ;; Found variable start
+        (progn
+          ;; Add literal segment before variable if any
+          (when (> var-start pos)
+            (push (list
+                   :type 'literal
+                   :value (substring template pos var-start))
+                  segments))
+          ;; Find variable end (guaranteed to exist due to balance check)
+          (let* ((var-end (string-match "}" template var-start))
+                 ;; Extract variable content
+                 (var-content
+                  (substring template (1+ var-start) var-end))
+                 (reserved
+                  (and (> (length var-content) 0)
+                       (eq (aref var-content 0) ?+)))
+                 (var-name
+                  (if reserved
+                      (substring var-content 1)
+                    var-content)))
+            ;; Validate variable name
+            ;; RFC 6570: Variable names must start with ALPHA / "_"
+            ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
+            (unless (string-match-p
+                     "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
+              (error
+               "Invalid variable name '%s' in resource template: %s"
+               var-name
+               template))
+            ;; Add variable segment
+            (push (list
+                   :type 'variable
+                   :name var-name
+                   :reserved reserved)
+                  segments)
+            (push var-name variables)
+            (setq pos (1+ var-end))))
         ;; No more variables, add remaining literal
         (when (< pos len)
           (push (list :type 'literal :value (substring template pos))
@@ -1036,8 +1048,13 @@ version and capabilities between the client and server."
       `((protocolVersion . ,mcp-server-lib-protocol-version)
         (serverInfo
          .
-         ((name . ,mcp-server-lib-name)
-          (version . ,mcp-server-lib-protocol-version)))
+         ((name
+           .
+           ,(or (plist-get server-record :name) server-id))
+          (version
+           .
+           ,(or (plist-get server-record :version)
+                mcp-server-lib-default-server-version))))
         (capabilities . ,capabilities))
       'instructions (plist-get server-record :instructions)))))
 
@@ -1342,7 +1359,17 @@ Call `mcp-server-lib-process-jsonrpc' and return its result as a parsed alist."
 
 PROPERTIES is a plist that may include:
 
-  :id            Server identifier (defaults to \"default\")
+  :id            Server identifier (defaults to \"default\").  Internal
+                 routing key selecting this server's tools/resources;
+                 never sent to the client.
+  :name          Optional string, the server's name reported as
+                 `serverInfo.name' in the MCP `initialize' result.
+                 Defaults to the effective :id when omitted.
+  :version       Optional string, the server's own version reported as
+                 `serverInfo.version' in the MCP `initialize' result.
+                 This is the consuming server's version, distinct from
+                 the MCP protocol version (`protocolVersion').  Defaults
+                 to `mcp-server-lib-default-server-version' when omitted.
   :instructions  Optional string describing how to use this server's
                  tools/resources; emitted as the `instructions' field
                  in the MCP `initialize' result per the protocol spec.
@@ -1405,6 +1432,8 @@ Resulting `tools/list' and `resources/list' response order is unspecified.
 Example:
   (mcp-server-lib-register-server
    :id \"my-server\"
+   :name \"My Server\"          ; optional, defaults to :id
+   :version \"1.2.0\"           ; optional, defaults to \"1.0.0\"
    :instructions \"Use list-files to enumerate ...\"
    :tools (list (list #\\='my-list-files
                       :id \"list-files\"
@@ -1414,20 +1443,29 @@ Example:
 
 See also: `mcp-server-lib-unregister-server'."
   (let* ((id-arg (plist-get properties :id))
+         (name-arg (plist-get properties :name))
+         (version-arg (plist-get properties :version))
          (instructions (plist-get properties :instructions))
          (tools (plist-get properties :tools))
          (resources (plist-get properties :resources))
          (id (or id-arg "default"))
+         (name (or name-arg id))
+         (version
+          (or version-arg mcp-server-lib-default-server-version))
          tool-entries
          seen-tool-ids
          resource-entries
          seen-resource-uris)
     (mcp-server-lib--validate-property-keys
      properties
-     '(:id :instructions :tools :resources)
+     '(:id :name :version :instructions :tools :resources)
      "Server registration")
     (when (and id-arg (not (stringp id-arg)))
       (error "Server registration requires :id to be a string"))
+    (when (and name-arg (not (stringp name-arg)))
+      (error "Server registration requires :name to be a string"))
+    (when (and version-arg (not (stringp version-arg)))
+      (error "Server registration requires :version to be a string"))
     (when (and instructions (not (stringp instructions)))
       (error
        "Server registration requires :instructions to be a string"))
@@ -1457,11 +1495,15 @@ See also: `mcp-server-lib-unregister-server'."
     ;; validation/build phase above.  Order of updates here is not
     ;; observable.
     (if-let* ((existing (gethash id mcp-server-lib--servers)))
-        (progn
-          (mcp-server-lib--bump-ref-count existing)
-          (when (plist-member properties :instructions)
-            (plist-put existing :instructions instructions)))
-      (let ((record (list :ref-count 1)))
+      (progn
+        (mcp-server-lib--bump-ref-count existing)
+        (when (plist-member properties :name)
+          (plist-put existing :name name))
+        (when (plist-member properties :version)
+          (plist-put existing :version version))
+        (when (plist-member properties :instructions)
+          (plist-put existing :instructions instructions)))
+      (let ((record (list :ref-count 1 :name name :version version)))
         (when (plist-member properties :instructions)
           (plist-put record :instructions instructions))
         (puthash id record mcp-server-lib--servers)))
@@ -1532,6 +1574,15 @@ See also: `mcp-server-lib-register-server'."
   (mcp-server-lib--ref-counted-unregister
    server-id mcp-server-lib--servers)
   nil)
+
+(defun mcp-server-lib-server-registered-p (server-id)
+  "Return non-nil if a server record is registered under SERVER-ID.
+A record exists once `mcp-server-lib-register-server' has been called
+for SERVER-ID and not yet fully torn down by
+`mcp-server-lib-unregister-server'.  Servers configured only through the
+obsolete `mcp-server-lib-register-tool' or `mcp-server-lib-register-resource'
+shims have no record and so are reported as not registered."
+  (and (gethash server-id mcp-server-lib--servers) t))
 
 ;;; API - Error handling
 

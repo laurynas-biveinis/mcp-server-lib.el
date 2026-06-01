@@ -4,7 +4,7 @@
 
 ;; Author: Laurynas Biveinis <laurynas.biveinis@gmail.com>
 ;; Keywords: tools, testing
-;; Version: 0.3.0
+;; Version: 0.4.0
 ;; URL: https://github.com/laurynas-biveinis/mcp-server-lib.el
 
 ;; This file is NOT part of GNU Emacs.
@@ -30,6 +30,7 @@
 
 (require 'cl-lib)
 (require 'ert)
+(require 'mcp-server-lib)
 (require 'mcp-server-lib-metrics)
 (require 'mcp-server-lib-commands)
 
@@ -38,6 +39,12 @@
 Child packages testing a single server should set this once at the top of
 their test file using setq.  Multi-server tests should use let-binding to
 temporarily override this value.")
+
+(defconst mcp-server-lib-ert-default-version "1.0.0-test"
+  "Default server :version used by test helpers that register a server.
+Test helpers that register a server without an explicit :version use
+this value, and the `initialize' assertion defaults its expected
+version to it, so registration and assertion agree by default.")
 
 (defun mcp-server-lib-ert-check-text-response
     (response &optional expected-error)
@@ -213,7 +220,13 @@ Returns the result field from the initialize response."
 
 (cl-defun
  mcp-server-lib-ert-assert-initialize-result
- (init-result tools resources &key instructions)
+ (init-result
+  tools
+  resources
+  &key
+  instructions
+  (name mcp-server-lib-ert-server-id)
+  (version mcp-server-lib-ert-default-version))
  "Assert the structure of an initialize result.
 INIT-RESULT is the result from an initialize request.
 TOOLS is a boolean indicating if tools capability is expected.
@@ -223,9 +236,14 @@ Optional INSTRUCTIONS keyword (specified as `:instructions'):
 - omitted or nil: assert the `instructions' field is not present.
 - string: assert the `instructions' field equals that string.
 
+Optional NAME keyword (`:name'): expected `serverInfo.name'.  Defaults
+to `mcp-server-lib-ert-server-id'.
+Optional VERSION keyword (`:version'): expected `serverInfo.version'.
+Defaults to `mcp-server-lib-ert-default-version'.
+
 This function validates:
 - Protocol version matches the expected version
-- Server info contains the correct server name
+- Server info contains the expected server name and version
 - Capabilities match the expected state for tools and resources
 - The `instructions' field per :instructions"
  (cl-check-type instructions (or null string))
@@ -233,8 +251,8 @@ This function validates:
        (capabilities (alist-get 'capabilities init-result))
        (server-info (alist-get 'serverInfo init-result)))
    (should (string= mcp-server-lib-protocol-version protocol-version))
-   (should
-    (string= mcp-server-lib-name (alist-get 'name server-info)))
+   (should (string= name (alist-get 'name server-info)))
+   (should (string= version (alist-get 'version server-info)))
    ;; Verify capabilities match expectations
    (when tools
      (should (assoc 'tools capabilities))
@@ -316,20 +334,30 @@ order, followed by the forms to execute:
   :instructions  Optional; if a string, asserts the `instructions' field
                  in the initialize result equals it; if omitted or nil,
                  asserts the field is absent
+  :name          Optional; expected `serverInfo.name'.  Defaults to
+                 `mcp-server-lib-ert-server-id'.
+  :version       Optional; expected `serverInfo.version'.  Defaults to
+                 `mcp-server-lib-ert-default-version'.
 
 This macro:
-1. Starts the MCP server with `mcp-server-lib-start'
-2. Sends and validates the initialize request
-3. Sends the initialized notification
-4. Executes the remaining BODY forms
-5. Stops the server with `mcp-server-lib-stop'
+1. Registers a minimal server under `mcp-server-lib-ert-server-id'
+   (with the expected :name/:version/:instructions) if one is not already
+   registered, tearing it down afterwards; an already-registered server is
+   left untouched
+2. Starts the MCP server with `mcp-server-lib-start'
+3. Sends and validates the initialize request
+4. Sends the initialized notification
+5. Executes the remaining BODY forms
+6. Stops the server with `mcp-server-lib-stop'
 
 Unknown keywords at the head of BODY, or a trailing keyword without a
 following value, signal an error at macro-expansion time."
  (declare (indent defun) (debug t))
  (let (tools
        resources
-       instructions)
+       instructions
+       (name 'mcp-server-lib-ert-server-id)
+       (version 'mcp-server-lib-ert-default-version))
    (while (and body (keywordp (car body)))
      (unless (cdr body)
        (error "Keyword %S has no value" (car body)))
@@ -344,27 +372,51 @@ following value, signal an error at macro-expansion time."
          (setq resources value))
         ((eq key :instructions)
          (setq instructions value))
+        ((eq key :name)
+         (setq name value))
+        ((eq key :version)
+         (setq version value))
         (t
          (error
-          "Unknown keyword %S; allowed: :tools, :resources, :instructions"
+          "Unknown keyword %S; allowed: :tools, :resources, :instructions, :name, :version"
           key)))
        (setq body (cddr body))))
-   `(unwind-protect
-        (progn
-          (mcp-server-lib-start)
-          (mcp-server-lib-ert-assert-initialize-result
-           (mcp-server-lib-ert--get-initialize-result)
-           ,tools
-           ,resources
-           :instructions ,instructions)
-          (should-not
-           (mcp-server-lib-process-jsonrpc
-            (json-encode
-             '(("jsonrpc" . "2.0")
-               ("method" . "notifications/initialized")))
-            mcp-server-lib-ert-server-id))
-          ,@body)
-      (mcp-server-lib-stop))))
+   (let ((registered-here (gensym "registered-here")))
+     `(let
+          ((,registered-here
+            ;; A server must be registered for `initialize' to report a
+            ;; serverInfo name/version.  When the caller has not already
+            ;; registered one (e.g. via `mcp-server-lib-register-server'),
+            ;; register a minimal one here and tear it down afterwards.
+            (unless (mcp-server-lib-server-registered-p
+                     mcp-server-lib-ert-server-id)
+              (mcp-server-lib-register-server
+               :id mcp-server-lib-ert-server-id
+               :name ,name
+               :version ,version
+               :instructions ,instructions)
+              t)))
+        (unwind-protect
+            (progn
+              (mcp-server-lib-start)
+              (mcp-server-lib-ert-assert-initialize-result
+               (mcp-server-lib-ert--get-initialize-result)
+               ,tools
+               ,resources
+               :instructions ,instructions
+               :name ,name
+               :version ,version)
+              (should-not
+               (mcp-server-lib-process-jsonrpc
+                (json-encode
+                 '(("jsonrpc" . "2.0")
+                   ("method" . "notifications/initialized")))
+                mcp-server-lib-ert-server-id))
+              ,@body)
+          (mcp-server-lib-stop)
+          (when ,registered-here
+            (mcp-server-lib-unregister-server
+             mcp-server-lib-ert-server-id)))))))
 
 (defun mcp-server-lib-ert-check-error-object
     (response expected-code expected-message)

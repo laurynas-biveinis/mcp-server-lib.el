@@ -80,6 +80,8 @@ Use =mcp-server-lib-register-server= to declare a server's metadata, tools, and 
 #+begin_src elisp
 (mcp-server-lib-register-server
   :id "my-server"                                          ; optional, defaults to "default"
+  :name "My Server"                                        ; optional, defaults to :id
+  :version "1.2.0"                                         ; optional, defaults to "1.0.0"
   :instructions "Cite source resource URIs when quoting their contents."  ; optional
   :tools
   (list
@@ -112,11 +114,13 @@ Each entry is registered with reference counting, so two bundled calls with over
 
 Every =mcp-server-lib-register-server= call creates or bumps a per-server metadata record, so each successful call must be paired with =mcp-server-lib-unregister-server= for clean teardown -- including calls that supply no =:tools=, =:resources=, or =:instructions=, and calls that rely on the default ="default"= =:id=.
 
+The optional =:name= (defaulting to =:id=) and =:version= (defaulting to ="1.0.0"=) are reported as =serverInfo.name= and =serverInfo.version= in the server's =initialize= response. These describe the server implementation; =:version= is the server's own version, distinct from the MCP =protocolVersion=. The =:id=, in contrast, is an internal routing key that selects the server's tools and resources and is never sent to the client. A server configured only through the obsolete =mcp-server-lib-register-tool= / =mcp-server-lib-register-resource= API has no metadata record, so its =serverInfo= reports the =server-id= as the name and the default version.
+
 The =:instructions= string is emitted in the server's =initialize= response (per the MCP protocol spec), giving the client's LLM guidance on how to use the server's tools and resources.
 
 **** Updating an existing tool or resource
 
-Re-registration under an existing key keeps the original spec; the new handler and properties are discarded and only the ref-count is bumped. This first-writer-wins policy keeps overlapping tools/resources stable for as long as any caller still holds a reference. To update a handler or properties, tear down with =mcp-server-lib-unregister-server= first and then re-register. =:instructions= is an exception (last-writer-wins) because it lives on the server record with no per-key ref-count.
+Re-registration under an existing key keeps the original spec; the new handler and properties are discarded and only the ref-count is bumped. This first-writer-wins policy keeps overlapping tools/resources stable for as long as any caller still holds a reference. To update a handler or properties, tear down with =mcp-server-lib-unregister-server= first and then re-register. =:name=, =:version=, and =:instructions= are exceptions (last-writer-wins) because they live on the server record with no per-key ref-count: a re-registration that supplies one of these keys overwrites the stored value, while omitting it leaves the previous value intact.
 
 *** Tool Handlers
 
@@ -330,9 +334,9 @@ When clients request the resource list, direct resources appear with a =uri= fie
 
 *** Constants
 
-=mcp-server-lib-name= - The name of the MCP server ("emacs-mcp-server-lib")
-
 =mcp-server-lib-protocol-version= - The MCP protocol version supported by this server ("2025-03-26")
+
+=mcp-server-lib-default-server-version= - Default =serverInfo.version= reported when a server registers without =:version= ("1.0.0")
 
 *** Utility Functions
 
@@ -351,6 +355,9 @@ For testing and debugging:
 ;; Server management
 (mcp-server-lib-start)
 (mcp-server-lib-stop)
+
+;; Query whether a server-id has a registered metadata record
+(mcp-server-lib-server-registered-p server-id)
 #+end_src
 
 *** Test Utilities
