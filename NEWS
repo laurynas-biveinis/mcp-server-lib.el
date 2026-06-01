@@ -29,6 +29,10 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     registered under a given server-id via
     `mcp-server-lib-register-server'.
 
+*** `mcp-server-lib-installed-script-path' function
+    New function: returns the path where `mcp-server-lib-install' places
+    `emacs-mcp-stdio.sh' (under `mcp-server-lib-install-directory').
+
 ** ERT Test Helpers
 
 *** `mcp-server-lib-ert-assert-initialize-result' gained `:name'/`:version'

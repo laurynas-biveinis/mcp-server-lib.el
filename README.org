@@ -358,6 +358,9 @@ For testing and debugging:
 
 ;; Query whether a server-id has a registered metadata record
 (mcp-server-lib-server-registered-p server-id)
+
+;; Path where mcp-server-lib-install places emacs-mcp-stdio.sh
+(mcp-server-lib-installed-script-path)
 #+end_src
 
 *** Test Utilities

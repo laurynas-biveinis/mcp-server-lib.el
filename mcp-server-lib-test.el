@@ -3910,6 +3910,17 @@ does not touch."
 
 ;;; Script installation tests
 
+(ert-deftest mcp-server-lib-test-installed-script-path ()
+  "Installed path is the stdio script under the configured directory."
+  (let* ((mcp-server-lib-install-directory "/tmp/mcp-test-dir")
+         (path (mcp-server-lib-installed-script-path)))
+    (should
+     (string= "emacs-mcp-stdio.sh" (file-name-nondirectory path)))
+    (should
+     (string=
+      (file-name-as-directory mcp-server-lib-install-directory)
+      (file-name-directory path)))))
+
 (ert-deftest mcp-server-lib-test-install ()
   "Test script installation to temporary directory."
   (let* ((temp-dir (make-temp-file "mcp-test-" t))
@@ -3919,17 +3930,17 @@ does not touch."
           (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t)))
             (mcp-server-lib-install))
           (should
-           (file-exists-p (mcp-server-lib--installed-script-path)))
+           (file-exists-p (mcp-server-lib-installed-script-path)))
           (should
            (file-executable-p
-            (mcp-server-lib--installed-script-path))))
+            (mcp-server-lib-installed-script-path))))
       (delete-directory temp-dir t))))
 
 (ert-deftest mcp-server-lib-test-install-overwrite ()
   "Test script installation when file already exists."
   (let* ((temp-dir (make-temp-file "mcp-test-" t))
          (mcp-server-lib-install-directory temp-dir)
-         (target (mcp-server-lib--installed-script-path)))
+         (target (mcp-server-lib-installed-script-path)))
     (unwind-protect
         (progn
           (write-region "existing content" nil target)
@@ -3945,7 +3956,7 @@ does not touch."
   "Test cancelling installation when file exists."
   (let* ((temp-dir (make-temp-file "mcp-test-" t))
          (mcp-server-lib-install-directory temp-dir)
-         (target (mcp-server-lib--installed-script-path)))
+         (target (mcp-server-lib-installed-script-path)))
     (unwind-protect
         (progn
           (write-region "existing content" nil target)
@@ -3963,7 +3974,7 @@ does not touch."
   "Test script removal from temporary directory."
   (let* ((temp-dir (make-temp-file "mcp-test-" t))
          (mcp-server-lib-install-directory temp-dir)
-         (target (mcp-server-lib--installed-script-path)))
+         (target (mcp-server-lib-installed-script-path)))
     (unwind-protect
         (progn
           (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t)))
@@ -3985,7 +3996,7 @@ does not touch."
   "Test cancelling uninstall."
   (let* ((temp-dir (make-temp-file "mcp-test-" t))
          (mcp-server-lib-install-directory temp-dir)
-         (target (mcp-server-lib--installed-script-path)))
+         (target (mcp-server-lib-installed-script-path)))
     (unwind-protect
         (progn
           (write-region "test content" nil target)

@@ -87,8 +87,9 @@ Returns nil if not found."
     (when (and script-path (file-exists-p script-path))
       script-path)))
 
-(defun mcp-server-lib--installed-script-path ()
-  "Return the path where the script should be installed."
+(defun mcp-server-lib-installed-script-path ()
+  "Return the path where `mcp-server-lib-install' places the stdio script.
+This is `emacs-mcp-stdio.sh' under `mcp-server-lib-install-directory'."
   (expand-file-name "emacs-mcp-stdio.sh"
                     mcp-server-lib-install-directory))
 
@@ -97,7 +98,7 @@ Returns nil if not found."
   "Install emacs-mcp-stdio.sh to `mcp-server-lib-install-directory'."
   (interactive)
   (let ((source (mcp-server-lib--package-script-path))
-        (target (mcp-server-lib--installed-script-path)))
+        (target (mcp-server-lib-installed-script-path)))
     (unless source
       (error "Cannot find emacs-mcp-stdio.sh in package directory"))
     (when (file-exists-p target)
@@ -114,7 +115,7 @@ Returns nil if not found."
 (defun mcp-server-lib-uninstall ()
   "Remove installed emacs-mcp-stdio.sh from `mcp-server-lib-install-directory'."
   (interactive)
-  (let ((target (mcp-server-lib--installed-script-path)))
+  (let ((target (mcp-server-lib-installed-script-path)))
     (unless (file-exists-p target)
       (user-error "No script found at: %s" target))
     (when (yes-or-no-p (format "Remove script at %s? " target))
