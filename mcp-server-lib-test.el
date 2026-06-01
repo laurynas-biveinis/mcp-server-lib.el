@@ -50,6 +50,23 @@ exercised exactly as for a direct call."
            (list :version mcp-server-lib-ert-default-version))))
   (apply #'mcp-server-lib-register-server properties))
 
+(defconst mcp-server-lib-test--repo-root
+  (locate-dominating-file
+   (or load-file-name buffer-file-name default-directory) "Eask")
+  "Repository root directory, located by searching upward for `Eask'.
+Used by meta tests that read project files (`Eask', the package
+`.el' files, `NEWS') by name.")
+
+(cl-assert (stringp mcp-server-lib-test--repo-root) t
+           "Could not locate repo root (Eask not found)")
+
+(defun mcp-server-lib-test--read-repo-file (relative-name)
+  "Return the contents of RELATIVE-NAME under the repository root."
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name relative-name mcp-server-lib-test--repo-root))
+    (buffer-string)))
+
 ;;; Test data
 
 (defconst mcp-server-lib-test--string-list-result "item1 item2 item3"
@@ -5233,6 +5250,51 @@ servers maintain separate namespaces."
            "test://123"
            '((uri . "test://123")
              (text . "Handler-2: params: ((\"id\" . \"123\"))"))))))))
+
+;;; Meta tests
+
+(ert-deftest mcp-server-lib-test-meta-version-strings-agree ()
+  "Test that the package version is consistent across all sites.
+The `Eask' file's `(package ...)' form, the `;; Version:' headers of
+`mcp-server-lib.el' and `mcp-server-lib-ert.el', and the `NEWS'
+top-section heading must all report the same version."
+  (let* ((eask-content (mcp-server-lib-test--read-repo-file "Eask"))
+         (el-content (mcp-server-lib-test--read-repo-file "mcp-server-lib.el"))
+         (ert-content
+          (mcp-server-lib-test--read-repo-file "mcp-server-lib-ert.el"))
+         (news-content (mcp-server-lib-test--read-repo-file "NEWS"))
+         (eask-version
+          (and (string-match
+                "(package[ \t\n]+\"[^\"]+\"[ \t\n]+\"\\([^\"]+\\)\""
+                eask-content)
+               (match-string 1 eask-content)))
+         (el-version
+          (and (string-match
+                "^;;[ \t]+Version:[ \t]+\\(\\S-+\\)"
+                el-content)
+               (match-string 1 el-content)))
+         (ert-version
+          (and (string-match
+                "^;;[ \t]+Version:[ \t]+\\(\\S-+\\)"
+                ert-content)
+               (match-string 1 ert-content)))
+         (news-version
+          (and (string-match
+                "^\\* Changes in mcp-server-lib \\(\\S-+\\)"
+                news-content)
+               (match-string 1 news-content))))
+    (unless (stringp eask-version)
+      (ert-fail "version not found in Eask via `(package ... \"VERSION\")'"))
+    (unless (stringp el-version)
+      (ert-fail "version not found in mcp-server-lib.el via `;; Version:'"))
+    (unless (stringp ert-version)
+      (ert-fail "version not found in mcp-server-lib-ert.el via `;; Version:'"))
+    (unless (stringp news-version)
+      (ert-fail
+       "version not found in NEWS via `* Changes in mcp-server-lib VERSION'"))
+    (should (equal eask-version el-version))
+    (should (equal eask-version ert-version))
+    (should (equal eask-version news-version))))
 
 (provide 'mcp-server-lib-test)
 
