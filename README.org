@@ -183,6 +183,9 @@ MCP Parameters:
     ))
 #+end_src
 
+These docstring descriptions are the single source for the tool's
+=inputSchema=; do not repeat them in the tool =:description= (see below).
+
 Tools can have zero, one, or multiple parameters. When a tool has multiple
 parameters, the JSON object fields from the client are automatically mapped to
 the function parameters by name. JSON field names must match the Lisp parameter
@@ -197,7 +200,12 @@ wrapped with =mcp-server-lib-with-error-handling=.
 
 Tool entry properties accepted in =:tools=:
 - =:id= (required) - String identifier for the tool (e.g., ="list-files"=)
-- =:description= (required) - String describing what the tool does
+- =:description= (required) - String describing what the tool does and when to
+  use it. Describe the tool as a whole; do *not* restate individual parameters
+  here. Per-parameter descriptions belong solely in the handler's =MCP
+  Parameters:= docstring block, from which they are extracted into the tool's
+  =inputSchema=. The client receives both, so repeating parameter text in
+  =:description= is redundant and risks drift.
 - =:title= - User-friendly display name
 - =:read-only= - Set to =t= if tool doesn't modify state
 

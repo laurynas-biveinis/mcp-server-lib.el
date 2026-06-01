@@ -1379,6 +1379,10 @@ PROPERTIES is a plist that may include:
   :tools         Optional list of tool specs.  Each spec is
                  `(HANDLER :id STR :description STR
                  [:title STR] [:read-only BOOL])'.
+                 :description should describe the tool as a whole;
+                 per-parameter text belongs in the handler's
+                 `MCP Parameters:' docstring block (extracted into
+                 inputSchema), not here.
                  Specs must not include :server-id.
   :resources     Optional list of resource specs.  Each spec is
                  `(URI HANDLER :name STR
@@ -1723,7 +1727,11 @@ Arguments:
 
 Required properties:
   :id              String identifier for the tool (e.g., \"list-files\")
-  :description     String describing what the tool does
+  :description     String describing what the tool does.  Describe the
+                   tool as a whole; do not restate parameters here --
+                   per-parameter descriptions go in the handler's
+                   `MCP Parameters:' docstring block (extracted into
+                   inputSchema).
 
 Optional properties:
   :title           User-friendly display name for the tool
