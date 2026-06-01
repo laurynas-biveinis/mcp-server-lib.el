@@ -2794,13 +2794,15 @@ laxness against future tightening refactors."
   (should-not (mcp-server-lib-unregister-server "never-registered")))
 
 (ert-deftest mcp-server-lib-test-unregister-server-clears-instructions ()
-  "After `mcp-server-lib-unregister-server', initialize omits the field.
-Black-box assertion only: this verifies the observable contract, not
-whether the per-server record was removed via `remhash' or merely
-nil-cleared.  Both implementations would satisfy this test."
+  "After `mcp-server-lib-unregister-server', the record is gone and the field omitted.
+Pins the resource-accounting contract -- the per-server record is fully
+removed, not kept with `:instructions' nil-cleared -- via
+`mcp-server-lib-server-registered-p', and the observable contract that a
+freshly registered default server's `initialize' omits instructions."
   (mcp-server-lib-test--register-server
    :id "default" :instructions "Will be dropped.")
   (mcp-server-lib-unregister-server "default")
+  (should-not (mcp-server-lib-server-registered-p "default"))
   (mcp-server-lib-ert-with-server :tools nil :resources nil))
 
 (ert-deftest mcp-server-lib-test-unregister-server-cross-server-isolation
