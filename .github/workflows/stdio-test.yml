@@ -28,12 +28,12 @@ jobs:
       statuses: write
 
     steps:
-      - uses: actions/checkout@v6 # zizmor: ignore[unpinned-uses]
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Set up Emacs
-        uses: purcell/setup-emacs@master # zizmor: ignore[unpinned-uses]
+        uses: purcell/setup-emacs@master
         with:
           version: ${{ matrix.emacs_version }}
 
