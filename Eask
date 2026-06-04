@@ -22,7 +22,7 @@
                 "--eval \"(require 'org)\" "
                 "--eval \"(require 'org-lint)\" "
                 "--eval \"(let ((all-checks-passed t) "
-                        "(files '(\\\"README.org\\\" \\\"TODO.org\\\"))) "
+                        "(files '(\\\"README.org\\\"))) "
                     "(dolist (file files all-checks-passed) "
                       "(with-temp-buffer "
                         "(insert-file-contents file) "

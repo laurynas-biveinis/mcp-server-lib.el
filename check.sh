@@ -121,7 +121,7 @@ fi
 
 # Org
 
-echo -n "Checking org files... README.org TODO.org "
+echo -n "Checking org files... README.org "
 if eask run script org-lint; then
 	echo "OK!"
 else
