@@ -229,6 +229,17 @@ Optional INDENT adds spaces before the key."
             (format "%-40s" key))))
     (format "%s %6d %7d %9.1f%%\n" formatted-key total errors rate)))
 
+(defun mcp-server-lib--insert-metrics-table-header (name-label)
+  "Insert metrics table column headers with NAME-LABEL naming the key column."
+  (insert
+   (format "%-40s %6s %7s %10s\n"
+           name-label
+           "Calls"
+           "Errors"
+           "Error %"))
+  (insert
+   "---------------------------------------- ------ ------- ----------\n"))
+
 (defun mcp-server-lib--collect-server-id (ids k _v)
   "Record server-id K in accumulator hash table IDS."
   (puthash k t ids))
@@ -410,8 +421,7 @@ templates under their sub-section headers when present."
       ;; Display method-level metrics
       (when method-metrics
         (insert "Method Calls:\n")
-        (insert
-         "---------------------------------------- ------ ------- ----------\n")
+        (mcp-server-lib--insert-metrics-table-header "Method")
         (dolist (entry
                  (sort method-metrics
                        #'mcp-server-lib--entry-key-lessp))
@@ -423,6 +433,7 @@ templates under their sub-section headers when present."
       ;; Display notifications
       (when notification-metrics
         (insert "Notifications:\n")
+        (insert (format "%-40s %6s\n" "Notification" "Calls"))
         (insert "---------------------------------------- ------\n")
         (dolist (entry
                  (sort notification-metrics
@@ -437,8 +448,7 @@ templates under their sub-section headers when present."
       ;; Display tool-specific metrics
       (when tool-metrics
         (insert "Tool Usage:\n")
-        (insert
-         "---------------------------------------- ------ ------- ----------\n")
+        (mcp-server-lib--insert-metrics-table-header "Tool")
         (dolist (entry
                  (sort tool-metrics
                        #'mcp-server-lib--entry-key-lessp))

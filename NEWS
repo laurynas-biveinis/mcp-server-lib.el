@@ -33,6 +33,12 @@ mcp-server-lib.el NEWS -- history of user-visible changes
     New function: returns the path where `mcp-server-lib-install' places
     `emacs-mcp-stdio.sh' (under `mcp-server-lib-install-directory').
 
+** Bug Fixes
+
+*** `mcp-server-lib-show-metrics' tables now have column headers
+    Each table in the metrics buffer is preceded by a header line
+    naming its columns.
+
 ** ERT Test Helpers
 
 *** `mcp-server-lib-ert-assert-initialize-result' gained `:name'/`:version'

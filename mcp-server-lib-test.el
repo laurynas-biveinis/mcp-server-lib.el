@@ -4073,14 +4073,21 @@ does not touch."
    (with-current-buffer "*MCP Metrics*"
      (let ((content (buffer-string)))
        (should (string-match "MCP Usage Metrics" content))
-       (should (string-match "Method Calls:" content))
+       (should
+        (string-match
+         "Method Calls:\nMethod +Calls +Errors +Error %\n-" content))
        ;; Should have at least 1 tools/list call from our test
        (should (string-match "tools/list\\s-+\\([0-9]+\\)" content))
        (let ((tools-list-count
               (string-to-number (match-string 1 content))))
          (should (>= tools-list-count 1)))
 
-       (should (string-match "Tool Usage:" content))
+       (should
+        (string-match
+         "Notifications:\nNotification +Calls\n-" content))
+       (should
+        (string-match
+         "Tool Usage:\nTool +Calls +Errors +Error %\n-" content))
        ;; Should have exactly 1 call to our test tool
        (should
         (string-match
