@@ -34,7 +34,7 @@
 ;;; Test helpers
 
 (defun mcp-server-lib-test--register-server (&rest properties)
-  "Call `mcp-server-lib-register-server', pinning :version for tests.
+  "Call `mcp-server-lib-register-server' with :version pinned.
 Most tests care only that registration succeeds, not about the server
 :version.  When PROPERTIES omits :version, supply
 `mcp-server-lib-ert-default-version' -- a fixed value the `initialize'
@@ -146,7 +146,7 @@ Used by meta tests that read project files (`Eask', the package
    "\\s-+Handler: mcp-server-lib-test--return-string\n"
    "\\s-+Usage: [0-9]+ calls\\(?:, [0-9]+ errors\\)?\n"
    "\\'")
-  "Regexp to match comprehensive describe-setup output with tools and resources.")
+  "Regexp matching describe-setup output with tools and resources.")
 
 (defconst mcp-server-lib-test--describe-setup-empty-regexp
   (concat
@@ -177,7 +177,7 @@ Used by meta tests that read project files (`Eask', the package
   "test result")
 
 (defun mcp-server-lib-test--return-alternate-string ()
-  "Generic handler returning a distinct string for discrimination tests."
+  "Generic handler returning a distinct string for discrimination."
   "alternate result")
 
 (defun mcp-server-lib-test--generic-error-handler ()
@@ -436,7 +436,7 @@ ITEMS are additional items."
   (format "Handler-2: params: %S" params))
 
 (defun mcp-server-lib-test--resource-template-handler-nil (_params)
-  "Test template handler that returns nil."
+  "Test template handler that yields nil."
   nil)
 
 (defun mcp-server-lib-test--resource-signal-error-invalid-params ()
@@ -692,7 +692,8 @@ expected properties."
 (defun mcp-server-lib-test--emacs-error-message
     (error-symbol &rest data)
   "Return what `error-message-string' produces for (ERROR-SYMBOL DATA...).
-Use instead of hardcoding messages that depend on `text-quoting-style'.
+Use instead of hardcoding messages that depend on the variable
+`text-quoting-style'.
 Do not use for `wrong-number-of-arguments': Emacs 29 and earlier strip
 the `closure' head from the signaled function value, so reconstructing
 the message from `symbol-function' does not match the runtime error.
@@ -714,7 +715,7 @@ the signaled function value, so reconstructing the message from
 
 (defun mcp-server-lib-test--check-jsonrpc-error
     (request expected-code expected-message)
-  "Test that JSON-RPC REQUEST is rejected with EXPECTED-CODE and EXPECTED-MESSAGE."
+  "Test that REQUEST is rejected with EXPECTED-CODE and EXPECTED-MESSAGE."
   (let ((resp-obj
          (mcp-server-lib-process-jsonrpc-parsed
           request mcp-server-lib-ert-server-id)))
@@ -846,7 +847,7 @@ EXPECTED-FIELDS is an alist of (field . value) pairs to verify."
          (equal (alist-get (car field) resource) (cdr field)))))))
 
 (defun mcp-server-lib-test--check-templates (expected-templates)
-  "Verify that the template list contains exactly EXPECTED-TEMPLATES.
+  "Verify the template list against the EXPECTED-TEMPLATES set.
 EXPECTED-TEMPLATES is a list of alists, where each alist contains
 \(field . value) pairs to verify for one template.  The verification is
 order-independent, matching templates by their \\='uriTemplate field."
@@ -880,7 +881,7 @@ that the error response has EXPECTED-CODE and EXPECTED-MESSAGE."
 
 (defun mcp-server-lib-test--check-resource-read-request-error
     (params expected-code expected-message)
-  "Test that a resources/read request with PARAMS returns expected error.
+  "Test that a resources/read request with PARAMS yields the expected error.
 PARAMS is the params value to send in the JSON-RPC request.
 EXPECTED-CODE is the expected error code.
 EXPECTED-MESSAGE is the expected error message."
@@ -1180,7 +1181,7 @@ When both are registered, capabilities should include both fields."
 (ert-deftest
     mcp-server-lib-test-initialize-with-valid-client-capabilities
     ()
-  "Test initialize request with valid client capabilities (roots, sampling, experimental)."
+  "Test initialize request with valid client capabilities."
   (mcp-server-lib-test--with-request "initialize"
     (let* ((init-request
             (json-encode
@@ -1316,7 +1317,7 @@ When both are registered, capabilities should include both fields."
      :type 'error)))
 
 (ert-deftest mcp-server-lib-test-register-tool-multiline-param ()
-  "Test that multi-line parameter descriptions with hyphens are parsed correctly.
+  "Test that multi-line parameter descriptions with hyphens parse correctly.
 Regression test for bug where continuation lines with hyphenated words
 like 'org-id' were incorrectly parsed as new parameter definitions."
   (mcp-server-lib-test--with-tools
@@ -1732,7 +1733,7 @@ that t means the tool was found."
 (ert-deftest
     mcp-server-lib-test-register-server-serverinfo-name-and-version
     ()
-  "initialize serverInfo reports the registered :name and :version.
+  "Initialize reports the registered :name and :version in serverInfo.
 The :version is the server's own version, distinct from the MCP
 `protocolVersion' (which the assertion checks separately)."
   (mcp-server-lib-test--with-server
@@ -1839,7 +1840,7 @@ record registered via `mcp-server-lib-register-server' is live."
    :type 'error))
 
 (ert-deftest mcp-server-lib-test-register-server-emits-instructions ()
-  "register-server :instructions causes initialize to include the field."
+  "With :instructions, register-server makes initialize include the field."
   (mcp-server-lib-test--with-server
     :id "default"
     :instructions
@@ -1862,7 +1863,7 @@ record registered via `mcp-server-lib-register-server' is live."
 (ert-deftest
     mcp-server-lib-test-register-server-no-instructions-omits-field
     ()
-  "register-server without :instructions leaves initialize without the field."
+  "Without :instructions, register-server leaves initialize without the field."
   (mcp-server-lib-test--with-server
     :id
     "default"
@@ -1882,9 +1883,10 @@ sees the field in the initialize result."
 (ert-deftest
     mcp-server-lib-test-register-server-empty-call-requires-paired-unregister
     ()
-  "Empty `(register-server)' call creates the per-server metadata record
-under \"default\" and must be paired with `unregister-server' for clean
-teardown.  Verified observably via ref-count: a subsequent call that
+  "Empty `(register-server)' creates a per-server metadata record.
+The record is keyed under \"default\" and must be paired with
+`unregister-server' for clean teardown.  Verified observably via
+ref-count: a subsequent call that
 supplies `:instructions' bumps the same record, so one unregister leaves
 the instructions visible (record at ref-count 1) and a second unregister
 removes them (record gone)."
@@ -2191,7 +2193,7 @@ neither tools nor resources are partially registered."
 (ert-deftest
     mcp-server-lib-test-register-server-atomicity-schema-error
     ()
-  "Tool whose error fires inside `--generate-schema-from-function' aborts the bundle.
+  "Tool error inside `--generate-schema-from-function' aborts the bundle.
 The error is raised by a function called from
 `mcp-server-lib--build-tool-entry', which runs before any state
 mutation in `mcp-server-lib-register-server'.  This regression guard
@@ -2298,8 +2300,8 @@ ref-count 1 and stay listed."
 (ert-deftest
     mcp-server-lib-test-register-server-atomicity-preserves-prior-state-resource-error
     ()
-  "Symmetric to `atomicity-preserves-prior-state' but the failing call's
-bad spec is in :resources.  The failing :resources includes a valid
+  "Symmetric to `atomicity-preserves-prior-state'; bad spec is in :resources.
+The failing :resources includes a valid
 entry that overlaps the prior URI before the invalid entry: under an
 \"apply-resource-as-built\" regression that re-bumps an existing entry
 before failing, the prior resource would survive the two unregisters
@@ -2345,8 +2347,8 @@ below at ref-count 1 and stay listed."
 (ert-deftest
     mcp-server-lib-test-register-server-atomicity-server-record-not-bumped
     ()
-  "Failed `register-server' call must not bump the per-server metadata
-record's ref-count.  Verified observably via `:instructions': after a
+  "Failed `register-server' must not bump the metadata record's ref-count.
+Verified observably via `:instructions': after a
 register + failing call + one `unregister-server', the record should be
 torn down (initialize must omit `instructions').  A regression that
 bumps the record's ref-count during the failing call would leave the
@@ -2457,8 +2459,8 @@ the same generic unknown-property path as any other unaccepted key."
 (ert-deftest
     mcp-server-lib-test-ert-with-server-unknown-keyword-rejected
     ()
-  "Unknown keyword in `mcp-server-lib-ert-with-server' is rejected at
-macro-expansion time."
+  "Unknown keyword in `mcp-server-lib-ert-with-server' is rejected.
+Rejection happens at macro-expansion time."
   (should-error
    (macroexpand '(mcp-server-lib-ert-with-server :tols t (should t)))
    :type 'error))
@@ -2466,8 +2468,8 @@ macro-expansion time."
 (ert-deftest
     mcp-server-lib-test-ert-with-server-trailing-keyword-rejected
     ()
-  "Trailing keyword without value in `mcp-server-lib-ert-with-server' is
-rejected at macro-expansion time."
+  "Trailing keyword to `mcp-server-lib-ert-with-server' is rejected.
+Rejection happens at macro-expansion time."
   (should-error
    (macroexpand '(mcp-server-lib-ert-with-server :tools))
    :type 'error))
@@ -2475,8 +2477,8 @@ rejected at macro-expansion time."
 (ert-deftest
     mcp-server-lib-test-ert-with-server-keyword-as-value-rejected
     ()
-  "Keyword in value position in `mcp-server-lib-ert-with-server' is
-rejected at macro-expansion time."
+  "Keyword in value position to `mcp-server-lib-ert-with-server' is rejected.
+Rejection happens at macro-expansion time."
   (should-error
    (macroexpand
     '(mcp-server-lib-ert-with-server :tools :resources t (should t)))
@@ -2678,7 +2680,7 @@ second value (`plist-get' returns the first match)."
 (ert-deftest
     mcp-server-lib-test-register-server-resources-dotted-list-rejected
     ()
-  ":resources that is a dotted (improper) list is rejected with a contextual error."
+  "Dotted (improper) :resources list is rejected with a contextual error."
   (let ((err
          (should-error
           (mcp-server-lib-test--register-server
@@ -2710,7 +2712,7 @@ second value (`plist-get' returns the first match)."
 (ert-deftest
     mcp-server-lib-test-register-server-resource-spec-not-cons-rejected
     ()
-  "An entry in :resources that isn't a `(URI HANDLER . PROPS)' list is rejected."
+  "A :resources entry that isn't a `(URI HANDLER . PROPS)' list is rejected."
   (should-error
    (mcp-server-lib-test--register-server
     :id "default"
@@ -2718,7 +2720,7 @@ second value (`plist-get' returns the first match)."
    :type 'error))
 
 (ert-deftest mcp-server-lib-test-register-server-tools-ref-count ()
-  "Two bundled calls increment tool ref-count; need two unregisters to clean up."
+  "Two bundled calls bump tool ref-count; two unregisters clean up."
   (let ((bundle
          '(:id
            "default"
@@ -2750,8 +2752,8 @@ second value (`plist-get' returns the first match)."
 (ert-deftest
     mcp-server-lib-test-register-server-tool-key-collision-keeps-original
     ()
-  "Across calls, a re-registered tool keeps the FIRST call's handler and
-properties; the second call's spec is discarded (only the ref-count is
+  "Re-registering a tool keeps the FIRST call's handler and properties.
+The second call's spec is discarded (only the ref-count is
 bumped).  Pins the documented \"first wins\" semantic for
 `mcp-server-lib-register-server'."
   (unwind-protect
@@ -2789,8 +2791,8 @@ bumped).  Pins the documented \"first wins\" semantic for
 (ert-deftest
     mcp-server-lib-test-register-server-resource-key-collision-keeps-original
     ()
-  "Across calls, a re-registered resource keeps the FIRST call's handler
-and properties; the second call's spec is discarded (only the ref-count
+  "Re-registering a resource keeps the FIRST call's handler and properties.
+The second call's spec is discarded (only the ref-count
 is bumped).  Pins the documented \"first wins\" semantic for
 `mcp-server-lib-register-server'."
   (unwind-protect
@@ -2979,8 +2981,8 @@ re-registration must not reset :name/:version to the id/default."
 (ert-deftest
     mcp-server-lib-test-register-server-instructions-only-call-does-not-bump-entries
     ()
-  "An `:instructions'-only register-server call does not bump tool or
-resource ref counts.  Tools and resources registered in call 1 remain
+  "An `:instructions'-only call bumps no tool or resource ref counts.
+Tools and resources registered in call 1 remain
 at ref-count 1; a single `unregister-server' fully tears them down
 while leaving the metadata record alive at ref-count 1."
   (mcp-server-lib-test--register-server
@@ -3052,7 +3054,7 @@ laxness against future tightening refactors."
 
 (ert-deftest mcp-server-lib-test-unregister-server-clears-instructions
     ()
-  "After `mcp-server-lib-unregister-server', the record is gone and the field omitted.
+  "After `mcp-server-lib-unregister-server', the record and field are gone.
 Pins the resource-accounting contract -- the per-server record is fully
 removed, not kept with `:instructions' nil-cleared -- via
 `mcp-server-lib-server-registered-p', and the observable contract that a
@@ -3111,7 +3113,7 @@ freshly registered default server's `initialize' omits instructions."
 (ert-deftest
     mcp-server-lib-test-unregister-server-cross-server-instructions-isolation
     ()
-  "Unregistering one server-id leaves another server-id's `:instructions' intact."
+  "Unregistering one server-id leaves another's `:instructions' intact."
   (mcp-server-lib-test--register-server
    :id "server-a"
    :instructions "Instructions for A.")
@@ -3664,7 +3666,7 @@ optional parameters are provided."
        "Missing required parameter: required-param"))))
 
 (ert-deftest mcp-server-lib-test-tools-call-missing-required-param ()
-  "Test that calling a multi-param tool with missing parameters returns an error."
+  "Test that a multi-param tool with missing parameters errors."
   (mcp-server-lib-test--with-tools
       ((#'mcp-server-lib-test--tool-handler-two-params
         :id "two-params"
@@ -3956,7 +3958,7 @@ optional parameters are provided."
 ;;; `mcp-server-lib-ert-process-tool-response' tests
 
 (ert-deftest mcp-server-lib-test-ert-process-tool-response-success ()
-  "Test that `mcp-server-lib-ert-process-tool-response' correctly parses JSON from successful tool response."
+  "Test `mcp-server-lib-ert-process-tool-response' on a success response."
   ;; Create a mock successful tool response with JSON content
   (let* ((json-data
           '((status . "ok") (count . 42) (items . ["a" "b" "c"])))
@@ -3976,7 +3978,7 @@ optional parameters are provided."
     (should (equal ["a" "b" "c"] (alist-get 'items parsed-result)))))
 
 (ert-deftest mcp-server-lib-test-ert-process-tool-response-error ()
-  "Test that `mcp-server-lib-ert-process-tool-response' signals error when isError is true."
+  "Test `mcp-server-lib-ert-process-tool-response' on an isError response."
   ;; Create a mock error response from tool
   (let* ((error-message "Tool execution failed: File not found")
          (response
@@ -3997,7 +3999,7 @@ optional parameters are provided."
        (should (string= error-message (car (cdr err))))))))
 
 (ert-deftest mcp-server-lib-test-ert-process-tool-response-invalid ()
-  "Test that `mcp-server-lib-ert-process-tool-response' fails on invalid response structure."
+  "Test `mcp-server-lib-ert-process-tool-response' on an invalid response."
   ;; Test with JSON-RPC error present
   (let ((response-with-error
          `((jsonrpc . "2.0")
@@ -4171,7 +4173,11 @@ optional parameters are provided."
       mcp-server-lib-test--describe-setup-stopped-regexp))
 
 (ert-deftest mcp-server-lib-test-describe-setup-comprehensive ()
-  "Test describe-setup with running status, multi-server alphabetical order, per-server :instructions/Refcount, nested tools with full property set, nested resources with optional fields, different handler types, and recorded metrics."
+  "Test describe-setup output for a comprehensive multi-server setup.
+Covers running status, alphabetical server order, per-server
+:instructions/Refcount, nested tools with full property set, nested
+resources with optional fields, different handler types, and recorded
+metrics."
   (mcp-server-lib-test--with-server
     :id "beta"
     :tools
@@ -4576,7 +4582,7 @@ does not touch."
        (text . "test result")))))
 
 (ert-deftest mcp-server-lib-test-resources-read-handler-nil ()
-  "Test that resource handler returning nil produces valid response with empty text."
+  "Test that a nil-returning resource handler yields empty text."
   (mcp-server-lib-test--with-resources
       (("test://nil-resource"
         #'mcp-server-lib-test--return-nil
@@ -4866,7 +4872,7 @@ otherwise be silently ignored."
       :type 'error))))
 
 (ert-deftest mcp-server-lib-test-unregister-resource-nonexistent ()
-  "Test that `mcp-server-lib-unregister-resource` returns nil for missing resources."
+  "Test `mcp-server-lib-unregister-resource' on a missing resource."
   (with-suppressed-warnings ((obsolete
                               mcp-server-lib-unregister-resource))
     (mcp-server-lib-ert-with-server
@@ -4908,7 +4914,7 @@ docstring contract that t means the resource was found."
 (ert-deftest
     mcp-server-lib-test-unregister-resource-template-returns-t-on-decrement
     ()
-  "`mcp-server-lib-unregister-resource' returns t when a template ref-count is decremented.
+  "`mcp-server-lib-unregister-resource' yields t on a template decrement.
 Templates take a separate dispatch path from static URIs in
 `mcp-server-lib-unregister-resource'; pin the same contract for the
 template branch."
@@ -4972,7 +4978,7 @@ template branch."
          (equal (alist-get 'mimeType resource2) "text/markdown"))))))
 
 (ert-deftest mcp-server-lib-test-resources-read-handler-error ()
-  "Test that resource handler errors return JSON-RPC error and increment error metrics."
+  "Test that resource handler errors yield a JSON-RPC error and bump metrics."
   (mcp-server-lib-test--with-resources
       (("test://error-resource"
         #'mcp-server-lib-test--generic-error-handler
@@ -5664,7 +5670,7 @@ form's `--build-resource-entry' code path."
          "params: ((\"path\" . \"path/with?query=value#section\"))"))))))
 
 (ert-deftest mcp-server-lib-test-resources-read-malformed-params ()
-  "Test resources/read with invalid params structure (string instead of object)."
+  "Test resources/read with invalid params (a string, not an object)."
   (mcp-server-lib-test--with-resources
       (("test://resource"
         #'mcp-server-lib-test--return-string
