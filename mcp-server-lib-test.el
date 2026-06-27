@@ -4527,7 +4527,7 @@ does not touch."
 
 ;;; Resource tests
 
-(ert-deftest test-mcp-server-lib-resources-list-empty ()
+(ert-deftest mcp-server-lib-test-resources-list-empty ()
   "Test resources/list with no registered resources."
   (mcp-server-lib-ert-with-server
    :tools nil
@@ -4535,7 +4535,7 @@ does not touch."
    nil
    (mcp-server-lib-test--check-no-resources)))
 
-(ert-deftest test-mcp-server-lib-register-resource ()
+(ert-deftest mcp-server-lib-test-register-resource ()
   "Test registering a direct resource."
   (mcp-server-lib-test--with-resources
       (("test://resource1"
@@ -4544,7 +4544,7 @@ does not touch."
         :description "A test resource"
         :mime-type "text/plain"))))
 
-(ert-deftest test-mcp-server-lib-register-resource-minimal ()
+(ert-deftest mcp-server-lib-test-register-resource-minimal ()
   "Test registering a resource with only required fields."
   (mcp-server-lib-test--with-resources
       (("test://minimal"
@@ -4555,7 +4555,7 @@ does not touch."
      "test://minimal"
      '((uri . "test://minimal") (text . "test result")))))
 
-(ert-deftest test-mcp-server-lib-resources-read ()
+(ert-deftest mcp-server-lib-test-resources-read ()
   "Test reading a resource."
   (mcp-server-lib-test--with-resources
       (("test://resource1"
@@ -4569,7 +4569,7 @@ does not touch."
        (mimeType . "text/plain")
        (text . "test result")))))
 
-(ert-deftest test-mcp-server-lib-resources-read-handler-nil ()
+(ert-deftest mcp-server-lib-test-resources-read-handler-nil ()
   "Test that resource handler returning nil produces valid response with empty text."
   (mcp-server-lib-test--with-resources
       (("test://nil-resource"
@@ -4580,7 +4580,7 @@ does not touch."
      "test://nil-resource"
      '((uri . "test://nil-resource") (text . nil)))))
 
-(ert-deftest test-mcp-server-lib-resources-read-not-found ()
+(ert-deftest mcp-server-lib-test-resources-read-not-found ()
   "Test reading a non-existent resource returns error."
   (mcp-server-lib-ert-with-server
    :tools nil
@@ -4590,7 +4590,7 @@ does not touch."
     mcp-server-lib-jsonrpc-error-invalid-params
     "Resource not found: test://nonexistent")))
 
-(ert-deftest test-mcp-server-lib-register-resource-duplicate ()
+(ert-deftest mcp-server-lib-test-register-resource-duplicate ()
   "Test registering the same resource twice increments ref count."
   (with-suppressed-warnings ((obsolete
                               mcp-server-lib-register-resource)
@@ -4626,7 +4626,7 @@ does not touch."
      ;; listed.
      (mcp-server-lib-test--check-no-resources))))
 
-(ert-deftest test-mcp-server-lib-register-resource-explicit-server-id
+(ert-deftest mcp-server-lib-test-register-resource-explicit-server-id
     ()
   "Round-trip the obsolete `register-resource' shims with explicit :server-id.
 Exercises the legacy shim's `:server-id' extraction (which strips
@@ -4747,7 +4747,7 @@ otherwise be silently ignored."
       :typo "x")
      :type 'error)))
 
-(ert-deftest test-mcp-server-lib-register-resource-error-missing-name
+(ert-deftest mcp-server-lib-test-register-resource-error-missing-name
     ()
   "Test that resource registration with missing :name produces an error."
   (with-suppressed-warnings ((obsolete
@@ -4763,7 +4763,7 @@ otherwise be silently ignored."
       :type 'error))))
 
 (ert-deftest
-    test-mcp-server-lib-register-resource-error-missing-handler
+    mcp-server-lib-test-register-resource-error-missing-handler
     ()
   "Test that resource registration with non-function handler produces an error."
   (with-suppressed-warnings ((obsolete
@@ -4778,7 +4778,7 @@ otherwise be silently ignored."
        :name "Test Resource")
       :type 'error))))
 
-(ert-deftest test-mcp-server-lib-register-resource-error-missing-uri
+(ert-deftest mcp-server-lib-test-register-resource-error-missing-uri
     ()
   "Test that resource registration with nil URI produces an error."
   (with-suppressed-warnings ((obsolete
@@ -4794,7 +4794,7 @@ otherwise be silently ignored."
       :type 'error))))
 
 (ert-deftest
-    test-mcp-server-lib-register-resource-error-non-string-uri
+    mcp-server-lib-test-register-resource-error-non-string-uri
     ()
   "Test that non-string URI is rejected."
   (with-suppressed-warnings ((obsolete
@@ -4810,7 +4810,7 @@ otherwise be silently ignored."
       :type 'error))))
 
 (ert-deftest
-    test-mcp-server-lib-register-resource-error-non-string-name
+    mcp-server-lib-test-register-resource-error-non-string-name
     ()
   "Test that non-string :name is rejected."
   (with-suppressed-warnings ((obsolete
@@ -4826,7 +4826,7 @@ otherwise be silently ignored."
       :type 'error))))
 
 (ert-deftest
-    test-mcp-server-lib-register-resource-error-non-string-description
+    mcp-server-lib-test-register-resource-error-non-string-description
     ()
   "Test that non-string :description is rejected."
   (with-suppressed-warnings ((obsolete
@@ -4843,7 +4843,7 @@ otherwise be silently ignored."
       :type 'error))))
 
 (ert-deftest
-    test-mcp-server-lib-register-resource-error-non-string-mime-type
+    mcp-server-lib-test-register-resource-error-non-string-mime-type
     ()
   "Test that non-string :mime-type is rejected."
   (with-suppressed-warnings ((obsolete
@@ -4859,7 +4859,7 @@ otherwise be silently ignored."
        :mime-type 42)
       :type 'error))))
 
-(ert-deftest test-mcp-server-lib-unregister-resource-nonexistent ()
+(ert-deftest mcp-server-lib-test-unregister-resource-nonexistent ()
   "Test that `mcp-server-lib-unregister-resource` returns nil for missing resources."
   (with-suppressed-warnings ((obsolete
                               mcp-server-lib-unregister-resource))
@@ -4929,7 +4929,7 @@ template branch."
             '(((uriTemplate . "rc://{id}") (name . "t")))))
        (mcp-server-lib-unregister-resource "rc://{id}")))))
 
-(ert-deftest test-mcp-server-lib-resources-list-multiple ()
+(ert-deftest mcp-server-lib-test-resources-list-multiple ()
   "Test listing multiple registered resources."
   (mcp-server-lib-test--with-resources
       (("test://resource1"
@@ -4965,7 +4965,7 @@ template branch."
         (should
          (equal (alist-get 'mimeType resource2) "text/markdown"))))))
 
-(ert-deftest test-mcp-server-lib-resources-read-handler-error ()
+(ert-deftest mcp-server-lib-test-resources-read-handler-error ()
   "Test that resource handler errors return JSON-RPC error and increment error metrics."
   (mcp-server-lib-test--with-resources
       (("test://error-resource"
@@ -5029,7 +5029,7 @@ template branch."
           'void-function
           'mcp-server-lib-test--handler-to-be-undefined))))))
 
-(ert-deftest test-mcp-server-lib-resources-list-mixed ()
+(ert-deftest mcp-server-lib-test-resources-list-mixed ()
   "Test listing both direct resources and templates."
   (mcp-server-lib-test--with-resources
       (("test://direct1"
@@ -5086,170 +5086,170 @@ form's `--build-resource-entry' code path."
       :type 'error))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-unclosed
+    mcp-server-lib-test-resource-template-invalid-syntax-unclosed
     ()
   "Test resource template with unclosed variable syntax error."
   (mcp-server-lib-test--assert-invalid-template-registration
    "org://{filename"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-unmatched-close
+    mcp-server-lib-test-resource-template-invalid-syntax-unmatched-close
     ()
   "Test resource template with unmatched closing brace syntax error."
   (mcp-server-lib-test--assert-invalid-template-registration
    "org://filename}"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-empty
+    mcp-server-lib-test-resource-template-invalid-syntax-empty
     ()
   "Test resource template with empty variable name syntax error."
   (mcp-server-lib-test--assert-invalid-template-registration
    "org://{}"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-numeric-variable
+    mcp-server-lib-test-resource-template-invalid-syntax-numeric-variable
     ()
   "Test resource template with numeric variable name is rejected."
   (mcp-server-lib-test--assert-invalid-template-registration
    "org://{123}/content"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-special-chars-variable
+    mcp-server-lib-test-resource-template-invalid-syntax-special-chars-variable
     ()
   "Test resource template with special characters in variable name is rejected."
   (mcp-server-lib-test--assert-invalid-template-registration
    "org://{var-name}/content"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-scheme-only
+    mcp-server-lib-test-resource-template-invalid-syntax-scheme-only
     ()
   "Test resource template with only scheme and no path."
   (mcp-server-lib-test--assert-invalid-template-registration
    "org://"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-no-scheme
+    mcp-server-lib-test-resource-template-invalid-syntax-no-scheme
     ()
   "Test resource template without a scheme."
   (mcp-server-lib-test--assert-invalid-template-registration "{foo}"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-single-colon
+    mcp-server-lib-test-resource-template-invalid-syntax-single-colon
     ()
   "Test resource template with single colon instead of ://."
   (mcp-server-lib-test--assert-invalid-template-registration
    "foo:bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-single-slash
+    mcp-server-lib-test-resource-template-invalid-syntax-single-slash
     ()
   "Test resource template with :/ instead of ://."
   (mcp-server-lib-test--assert-invalid-template-registration
    "foo:/bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-no-colon
+    mcp-server-lib-test-resource-template-invalid-syntax-no-colon
     ()
   "Test resource template with path but no scheme separator."
   (mcp-server-lib-test--assert-invalid-template-registration
    "foo/bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-extra-colon
+    mcp-server-lib-test-resource-template-invalid-syntax-extra-colon
     ()
   "Test resource template with extra colon before ://."
   (mcp-server-lib-test--assert-invalid-template-registration
    "foo:://bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-no-scheme-prefix
+    mcp-server-lib-test-resource-template-invalid-syntax-no-scheme-prefix
     ()
   "Test resource template starting with ://."
   (mcp-server-lib-test--assert-invalid-template-registration
    "://bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-double-slash-only
+    mcp-server-lib-test-resource-template-invalid-syntax-double-slash-only
     ()
   "Test resource template with // but no scheme."
   (mcp-server-lib-test--assert-invalid-template-registration
    "foo//bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-trailing-colon
+    mcp-server-lib-test-resource-template-invalid-syntax-trailing-colon
     ()
   "Test resource template with trailing colon only."
   (mcp-server-lib-test--assert-invalid-template-registration "foo:"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-colon-slash
+    mcp-server-lib-test-resource-template-invalid-syntax-colon-slash
     ()
   "Test resource template with :/ at end."
   (mcp-server-lib-test--assert-invalid-template-registration "foo:/"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-leading-colon
+    mcp-server-lib-test-resource-template-invalid-syntax-leading-colon
     ()
   "Test resource template starting with colon."
   (mcp-server-lib-test--assert-invalid-template-registration
    ":foo//bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-space-in-scheme
+    mcp-server-lib-test-resource-template-invalid-syntax-space-in-scheme
     ()
   "Test resource template with space in scheme."
   (mcp-server-lib-test--assert-invalid-template-registration
    "foo bar://baz"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-numeric-scheme
+    mcp-server-lib-test-resource-template-invalid-syntax-numeric-scheme
     ()
   "Test resource template with numeric scheme."
   (mcp-server-lib-test--assert-invalid-template-registration
    "123://bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-underscore-in-scheme
+    mcp-server-lib-test-resource-template-invalid-syntax-underscore-in-scheme
     ()
   "Test resource template with underscore in scheme."
   (mcp-server-lib-test--assert-invalid-template-registration
    "foo_bar://baz"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-hyphen-first
+    mcp-server-lib-test-resource-template-invalid-syntax-hyphen-first
     ()
   "Test resource template with hyphen as first character in scheme."
   (mcp-server-lib-test--assert-invalid-template-registration
    "-foo://bar"))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-empty-string
+    mcp-server-lib-test-resource-template-invalid-syntax-empty-string
     ()
   "Test resource template with empty string."
   (mcp-server-lib-test--assert-invalid-template-registration ""))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-invalid-syntax-whitespace-only
+    mcp-server-lib-test-resource-template-invalid-syntax-whitespace-only
     ()
   "Test resource template with whitespace only."
   (mcp-server-lib-test--assert-invalid-template-registration "   "))
 
-(ert-deftest test-mcp-server-lib-register-resource-nil-handler ()
+(ert-deftest mcp-server-lib-test-register-resource-nil-handler ()
   "Test resource registration with nil handler fails."
   (mcp-server-lib-test--assert-invalid-handler-registration
    nil "nil handler"))
 
-(ert-deftest test-mcp-server-lib-register-resource-string-handler ()
+(ert-deftest mcp-server-lib-test-register-resource-string-handler ()
   "Test resource registration with string handler fails."
   (mcp-server-lib-test--assert-invalid-handler-registration
    "not a function" "string handler"))
 
-(ert-deftest test-mcp-server-lib-register-resource-number-handler ()
+(ert-deftest mcp-server-lib-test-register-resource-number-handler ()
   "Test resource registration with number handler fails."
   (mcp-server-lib-test--assert-invalid-handler-registration
    42 "number handler"))
 
-(ert-deftest test-mcp-server-lib-resource-template-simple-variable ()
+(ert-deftest mcp-server-lib-test-resource-template-simple-variable ()
   "Test resource template with simple variable."
   (mcp-server-lib-test--with-resources
       (("org://{filename}"
@@ -5268,7 +5268,7 @@ form's `--build-resource-entry' code path."
      mcp-server-lib-jsonrpc-error-invalid-params
      "Resource not found: file://projects.org")))
 
-(ert-deftest test-mcp-server-lib-resource-template-reserved-expansion
+(ert-deftest mcp-server-lib-test-resource-template-reserved-expansion
     ()
   "Test resource template with reserved expansion."
   (mcp-server-lib-test--with-resources
@@ -5283,7 +5283,7 @@ form's `--build-resource-entry' code path."
        (text
         . "params: ((\"path\" . \"folder/subfolder/file.org\"))")))))
 
-(ert-deftest test-mcp-server-lib-resource-template-multiple-variables
+(ert-deftest mcp-server-lib-test-resource-template-multiple-variables
     ()
   "Test resource template with multiple variables."
   (mcp-server-lib-test--with-resources
@@ -5299,7 +5299,7 @@ form's `--build-resource-entry' code path."
         .
         "params: ((\"filename\" . \"todo.org\") (\"path\" . \"Tasks/Urgent\"))")))))
 
-(ert-deftest test-mcp-server-lib-register-resource-missing-name ()
+(ert-deftest mcp-server-lib-test-register-resource-missing-name ()
   "Test error when registering template without name."
   (with-suppressed-warnings ((obsolete
                               mcp-server-lib-register-resource))
@@ -5312,7 +5312,7 @@ form's `--build-resource-entry' code path."
        #'mcp-server-lib-test--resource-template-handler-dump-params)
       :type 'error))))
 
-(ert-deftest test-mcp-server-lib-resources-read-direct-precedence ()
+(ert-deftest mcp-server-lib-test-resources-read-direct-precedence ()
   "Test that direct resources take precedence over resource templates."
   (mcp-server-lib-ert-with-server
    :tools nil
@@ -5331,7 +5331,7 @@ form's `--build-resource-entry' code path."
       '((uri . "test://exact") (text . "test result"))))))
 
 (ert-deftest
-    test-mcp-server-lib-resources-read-multiple-template-schemes
+    mcp-server-lib-test-resources-read-multiple-template-schemes
     ()
   "Test that resource templates with different schemes route correctly."
   (mcp-server-lib-ert-with-server
@@ -5355,7 +5355,7 @@ form's `--build-resource-entry' code path."
         (text
          . "Handler-2: params: ((\"docname\" . \"manual.pdf\"))"))))))
 
-(ert-deftest test-mcp-server-lib-resources-read-no-template-match ()
+(ert-deftest mcp-server-lib-test-resources-read-no-template-match ()
   "Test error when no resource template matches the URI."
   (mcp-server-lib-ert-with-server
    :tools nil
@@ -5375,7 +5375,7 @@ form's `--build-resource-entry' code path."
       "Resource not found: other://123"))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-empty-parameter-value
+    mcp-server-lib-test-resource-template-empty-parameter-value
     ()
   "Test resource template matching with empty parameter value."
   (mcp-server-lib-test--with-resources
@@ -5387,7 +5387,7 @@ form's `--build-resource-entry' code path."
      "org://"
      '((uri . "org://") (text . "params: ((\"filename\" . \"\"))")))))
 
-(ert-deftest test-mcp-server-lib-unregister-resource-multiple ()
+(ert-deftest mcp-server-lib-test-unregister-resource-multiple ()
   "Test unregistering one resource when multiple are registered."
   (mcp-server-lib-test--with-resources
       (("org://{filename}"
@@ -5436,7 +5436,7 @@ form's `--build-resource-entry' code path."
      mcp-server-lib-jsonrpc-error-invalid-params
      "Resource not found: doc://manual.pdf")))
 
-(ert-deftest test-mcp-server-lib-resources-read-template-handler-error
+(ert-deftest mcp-server-lib-test-resources-read-template-handler-error
     ()
   "Test template handler errors bumping metrics and returning JSON-RPC errors."
   (mcp-server-lib-ert-with-server
@@ -5455,7 +5455,7 @@ form's `--build-resource-entry' code path."
        mcp-server-lib-jsonrpc-error-internal
        "Error reading resource error://test: Generic error occurred"))))
 
-(ert-deftest test-mcp-server-lib-resources-read-template-handler-nil
+(ert-deftest mcp-server-lib-test-resources-read-template-handler-nil
     ()
   "Test nil-returning template handler produces valid response with empty text."
   (mcp-server-lib-ert-with-server
@@ -5474,7 +5474,7 @@ form's `--build-resource-entry' code path."
       "nil://test" '((uri . "nil://test") (text . nil))))))
 
 (ert-deftest
-    test-mcp-server-lib-resources-read-template-handler-undefined
+    mcp-server-lib-test-resources-read-template-handler-undefined
     ()
   "Test reading a resource template whose handler function no longer exists."
   (mcp-server-lib-ert-with-server
@@ -5503,7 +5503,7 @@ form's `--build-resource-entry' code path."
            'mcp-server-lib-test--handler-to-be-undefined))))))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-scheme-case-insensitive
+    mcp-server-lib-test-resource-template-scheme-case-insensitive
     ()
   "Test that URI schemes should be case-insensitive per RFC 3986."
   (mcp-server-lib-test--with-resources
@@ -5521,7 +5521,7 @@ form's `--build-resource-entry' code path."
        (text . "params: ((\"id\" . \"456\"))")))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-variable-names-case-sensitive
+    mcp-server-lib-test-resource-template-variable-names-case-sensitive
     ()
   "Test that variable names in templates are case-sensitive per RFC 6570."
   (mcp-server-lib-ert-with-server
@@ -5548,7 +5548,7 @@ form's `--build-resource-entry' code path."
         (text . "params: ((\"username\" . \"john\"))"))))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-path-literals-case-sensitive
+    mcp-server-lib-test-resource-template-path-literals-case-sensitive
     ()
   "Test that literal path segments are case-sensitive."
   (mcp-server-lib-ert-with-server
@@ -5585,7 +5585,7 @@ form's `--build-resource-entry' code path."
       "Resource not found: test://Path/789"))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-unicode-in-variables
+    mcp-server-lib-test-resource-template-unicode-in-variables
     ()
   "Test Unicode characters in variable values with proper percent-encoding."
   (mcp-server-lib-test--with-resources
@@ -5609,7 +5609,7 @@ form's `--build-resource-entry' code path."
        (text . "params: ((\"filename\" . \"文档.org\"))")))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-percent-encoded-extraction
+    mcp-server-lib-test-resource-template-percent-encoded-extraction
     ()
   "Test that extracted parameters remain percent-encoded."
   (mcp-server-lib-ert-with-server
@@ -5638,7 +5638,7 @@ form's `--build-resource-entry' code path."
          . "params: ((\"path\" . \"file%2Bwith%2Bplus.txt\"))"))))))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-reserved-expansion-passthrough
+    mcp-server-lib-test-resource-template-reserved-expansion-passthrough
     ()
   "Test that {+var} allows reserved chars without encoding."
   (mcp-server-lib-ert-with-server
@@ -5657,7 +5657,7 @@ form's `--build-resource-entry' code path."
          .
          "params: ((\"path\" . \"path/with?query=value#section\"))"))))))
 
-(ert-deftest test-mcp-server-lib-resources-read-malformed-params ()
+(ert-deftest mcp-server-lib-test-resources-read-malformed-params ()
   "Test resources/read with invalid params structure (string instead of object)."
   (mcp-server-lib-test--with-resources
       (("test://resource"
@@ -5669,7 +5669,7 @@ form's `--build-resource-entry' code path."
      mcp-server-lib-jsonrpc-error-internal
      "Internal error: Wrong type argument: listp, \"invalid string params\"")))
 
-(ert-deftest test-mcp-server-lib-resources-read-missing-uri ()
+(ert-deftest mcp-server-lib-test-resources-read-missing-uri ()
   "Test resources/read without uri parameter."
   (mcp-server-lib-ert-with-server
    :tools nil
@@ -5680,7 +5680,7 @@ form's `--build-resource-entry' code path."
     mcp-server-lib-jsonrpc-error-invalid-params
     "Resource not found: nil")))
 
-(ert-deftest test-mcp-server-lib-resources-read-numeric-uri ()
+(ert-deftest mcp-server-lib-test-resources-read-numeric-uri ()
   "Test resources/read with numeric uri."
   (mcp-server-lib-ert-with-server
    :tools nil
@@ -5691,7 +5691,7 @@ form's `--build-resource-entry' code path."
     mcp-server-lib-jsonrpc-error-invalid-params
     "Resource not found: 123")))
 
-(ert-deftest test-mcp-server-lib-resources-read-array-uri ()
+(ert-deftest mcp-server-lib-test-resources-read-array-uri ()
   "Test resources/read with array uri."
   (mcp-server-lib-ert-with-server
    :tools nil
@@ -5703,7 +5703,7 @@ form's `--build-resource-entry' code path."
     "Resource not found: [test array]")))
 
 (ert-deftest
-    test-mcp-server-lib-resource-template-handler-wrong-signature
+    mcp-server-lib-test-resource-template-handler-wrong-signature
     ()
   "Test template handler that doesn't accept params argument."
   (mcp-server-lib-test--with-resources
