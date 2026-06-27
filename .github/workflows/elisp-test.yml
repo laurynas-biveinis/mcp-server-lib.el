@@ -59,6 +59,7 @@ jobs:
           eask install
           eask compile
           eask lint elisp-lint
+          eask lint elisp-lint mcp-server-lib-test.el mcp-server-lib-bytecode-handler-test.el
           eask lint keywords
           eask lint regexps
           eask run script test

@@ -42,6 +42,10 @@ set -eu -o pipefail
 
 readonly SHELL_FILES=(check.sh emacs-mcp-stdio.sh emacs-mcp-stdio-test.sh)
 
+# Test files are excluded from the Eask package file set, so the no-argument
+# eask format/lint commands below do not see them; pass them explicitly.
+readonly ELISP_TEST_FILES=(mcp-server-lib-test.el mcp-server-lib-bytecode-handler-test.el)
+
 ERRORS=0
 ELISP_SYNTAX_FAILED=0
 SHELL_SYNTAX_FAILED=0
@@ -62,7 +66,8 @@ if [ $ELISP_SYNTAX_FAILED -eq 0 ]; then
 	echo -n "Running elisp-autofmt... "
 	# Note: elisp-autofmt and elisp-lint may disagree on cl-defmacro formatting
 	# See https://codeberg.org/ideasman42/emacs-elisp-autofmt/issues/10
-	if eask format elisp-autofmt; then
+	if eask format elisp-autofmt &&
+		eask format elisp-autofmt "${ELISP_TEST_FILES[@]}"; then
 		echo "OK!"
 	else
 		echo "elisp-autofmt failed!"
@@ -77,7 +82,8 @@ eask clean elc >/dev/null 2>&1 || true
 # Only run elisp-lint if there are no errors so far
 if [ $ERRORS -eq 0 ]; then
 	echo -n "Running elisp-lint... "
-	if eask lint elisp-lint; then
+	if eask lint elisp-lint &&
+		eask lint elisp-lint "${ELISP_TEST_FILES[@]}"; then
 		echo "OK!"
 	else
 		echo "elisp-lint failed"
