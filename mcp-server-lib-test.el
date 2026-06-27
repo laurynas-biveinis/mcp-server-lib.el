@@ -435,8 +435,8 @@ ITEMS are additional items."
   "Alternative template handler that dumps PARAMS."
   (format "Handler-2: params: %S" params))
 
-(defun mcp-server-lib-test--resource-template-handler-nil (params)
-  "Test template handler to ignore PARAMS and return nil."
+(defun mcp-server-lib-test--resource-template-handler-nil (_params)
+  "Test template handler that returns nil."
   nil)
 
 (defun mcp-server-lib-test--resource-signal-error-invalid-params ()
@@ -582,48 +582,54 @@ The URI-TEMPLATE is searched as uriTemplate in JSON."
      (equal (alist-get 'uriTemplate r) uri-template))
    resources))
 
-(defun mcp-server-lib-test--is-template-resource (resource-spec)
-  "Return non-nil if RESOURCE-SPEC represents a template resource.
+;; These helpers run at macro-expansion time inside
+;; `mcp-server-lib-test--with-resources', so they must be defined when the
+;; file is byte-compiled standalone.
+(eval-and-compile
+  (defun mcp-server-lib-test--is-template-resource (resource-spec)
+    "Return non-nil if RESOURCE-SPEC represents a template resource.
 RESOURCE-SPEC is a list where the first element is the URI or template."
-  (string-match-p "{" (car resource-spec)))
+    (string-match-p "{" (car resource-spec)))
 
-(defun mcp-server-lib-test--build-resource-verification
-    (resource-spec)
-  "Build verification code for a single RESOURCE-SPEC.
+  (defun mcp-server-lib-test--build-resource-verification
+      (resource-spec)
+    "Build verification code for a single RESOURCE-SPEC.
 RESOURCE-SPEC is a list of (URI HANDLER &rest PROPERTIES).
 Returns a form that verifies the resource appears in --resource-list
 with expected properties."
-  (let* ((uri (car resource-spec))
-         (props (cddr resource-spec))
-         (name (plist-get props :name))
-         (description (plist-get props :description))
-         (mime-type (plist-get props :mime-type))
-         (is-template (string-match-p "{" uri)))
-    `(let ((--resource
-            ,(if is-template
-                 `(mcp-server-lib-test--find-resource-by-uri-template
-                   ,uri --resource-list)
-               `(mcp-server-lib-test--find-resource-by-uri
-                 ,uri --resource-list))))
-       (should --resource)
-       (should
-        (equal
-         (alist-get
-          ',(if is-template
-                'uriTemplate
-              'uri)
-          --resource)
-         ,uri))
-       (should (equal (alist-get 'name --resource) ,name))
-       ,@
-       (when description
-         `((should
-            (equal
-             (alist-get 'description --resource) ,description))))
-       ,@
-       (when mime-type
-         `((should
-            (equal (alist-get 'mimeType --resource) ,mime-type)))))))
+    (let* ((uri (car resource-spec))
+           (props (cddr resource-spec))
+           (name (plist-get props :name))
+           (description (plist-get props :description))
+           (mime-type (plist-get props :mime-type))
+           (is-template (string-match-p "{" uri)))
+      `(let
+           ((--resource
+             ,(if is-template
+                  `(mcp-server-lib-test--find-resource-by-uri-template
+                    ,uri --resource-list)
+                `(mcp-server-lib-test--find-resource-by-uri
+                  ,uri --resource-list))))
+         (should --resource)
+         (should
+          (equal
+           (alist-get
+            ',(if is-template
+                  'uriTemplate
+                'uri)
+            --resource)
+           ,uri))
+         (should (equal (alist-get 'name --resource) ,name))
+         ,@
+         (when description
+           `((should
+              (equal
+               (alist-get 'description --resource) ,description))))
+         ,@
+         (when mime-type
+           `((should
+              (equal
+               (alist-get 'mimeType --resource) ,mime-type))))))))
 
 (defmacro mcp-server-lib-test--with-resources (resources &rest body)
   "Run BODY with MCP server active and RESOURCES registered.
@@ -986,7 +992,7 @@ If omitted, all parameters are treated as required."
 
 (defun mcp-server-lib-test--check-non-string-return-error
     (handler-func tool-id request-id expected-type)
-  "Test that a tool handler returning non-string value throws type validation error.
+  "Test that a non-string handler return throws a type-validation error.
 HANDLER-FUNC is the test handler function that returns a non-string value.
 TOOL-ID is the tool identifier string.
 REQUEST-ID is the JSON-RPC request ID.
