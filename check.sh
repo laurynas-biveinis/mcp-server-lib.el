@@ -2,8 +2,7 @@
 # check.sh - Run all quality checks, with focus on providing guardrails for LLM
 # coding agents.
 #
-# Continue on errors but track them
-
+# Continue on errors but track them.
 #
 # Linters / tests / autoformatters and their dependencies:
 #
@@ -19,8 +18,10 @@
 #     - It may still produce formatting issues even after a successful
 #       elisp-autofmt call, but much fewer of them, and more suitable for fixing
 #       by the LLM.
+#   - Run eask lint keywords and eask lint regexps
+#     - Skip if there were syntax errors
 #   - Run ERT tests
-#     - Skip if there were syntax errors#
+#     - Skip if there were syntax errors
 # - Org (elisp-adjacent): call Emacs org-lint on Org files
 # - Shell:
 #   - Check syntax with bash -n
@@ -35,13 +36,20 @@
 #   - Check formatting with prettier
 #   - Check terminology with textlint
 # - GitHub Actions / YAML:
-#   - Check GitHub workflows with actionlint
+#   - Check workflows with actionlint
+#   - Check workflow security with zizmor
+#   - Check workflow security with checkov
 #   - Check YAML formatting with prettier
+# - JavaScript/TypeScript/JSON (Biome):
+#   - Check formatting with Biome
+#   - Lint with Biome
 
 set -eu -o pipefail
 
 readonly SHELL_FILES=(check.sh emacs-mcp-stdio.sh emacs-mcp-stdio-test.sh)
-
+# Explicitly list markdown files to lint, excluding uncommitted LLM
+# scratch/memory files.
+readonly MARKDOWN_FILES=(CLAUDE.md)
 # Test files are excluded from the Eask package file set, so the no-argument
 # eask format/lint commands below do not see them; pass them explicitly.
 readonly ELISP_TEST_FILES=(mcp-server-lib-test.el mcp-server-lib-bytecode-handler-test.el)
@@ -53,7 +61,9 @@ SHELL_SYNTAX_FAILED=0
 # Elisp
 
 echo -n "Checking Elisp syntax... "
-if eask recompile; then
+# recompile covers the package files (Eask `files'); the test files are not
+# package files, so byte-compile them explicitly too.
+if eask recompile && eask compile "${ELISP_TEST_FILES[@]}"; then
 	echo "OK!"
 else
 	echo "Elisp syntax check failed!"
@@ -77,7 +87,8 @@ else
 	echo "Skipping indentation due to syntax errors"
 fi
 
-eask clean elc >/dev/null 2>&1 || true
+# Remove byte-compiled files before linter to avoid conflicts
+eask clean elc
 
 # Only run elisp-lint if there are no errors so far
 if [ $ERRORS -eq 0 ]; then
@@ -93,23 +104,30 @@ else
 	echo "Skipping elisp-lint due to previous errors"
 fi
 
-eask clean elc >/dev/null 2>&1 || true
+# Remove byte-compiled files after elisp-lint
+eask clean elc
 
-# Run Eask keywords lint
-echo -n "Running eask lint keywords... "
-if eask lint keywords; then
-	echo "OK!"
-else
-	echo "eask lint keywords failed"
-	ERRORS=$((ERRORS + 1))
-fi
+# These linters read source forms, not byte-compiled output, so gate them on
+# syntax errors like the ERT block rather than the broader ERRORS.
+if [ $ELISP_SYNTAX_FAILED -eq 0 ]; then
+	echo -n "Running eask lint keywords... "
+	if eask lint keywords; then
+		echo "OK!"
+	else
+		echo "eask lint keywords failed"
+		ERRORS=$((ERRORS + 1))
+	fi
 
-echo -n "Running eask lint regexps... "
-if eask lint regexps; then
-	echo "OK!"
+	echo -n "Running eask lint regexps... "
+	if eask lint regexps &&
+		eask lint regexps "${ELISP_TEST_FILES[@]}"; then
+		echo "OK!"
+	else
+		echo "eask lint regexps failed"
+		ERRORS=$((ERRORS + 1))
+	fi
 else
-	echo "eask lint regexps failed"
-	ERRORS=$((ERRORS + 1))
+	echo "Skipping eask lint keywords and regexps due to syntax errors"
 fi
 
 # Only run ERT tests if there are no Elisp syntax errors
@@ -127,7 +145,7 @@ fi
 
 # Org
 
-echo -n "Checking org files... README.org "
+echo -n "Checking org files... "
 if eask run script org-lint; then
 	echo "OK!"
 else
@@ -174,24 +192,24 @@ fi
 
 # Markdown
 
-echo -n "Checking Markdown files... $(echo ./*.md) "
-if mdl --no-verbose ./*.md; then
+echo -n "Checking Markdown files... ${MARKDOWN_FILES[*]} "
+if mdl --no-verbose "${MARKDOWN_FILES[@]}"; then
 	echo "OK!"
 else
 	echo "mdl check failed"
 	ERRORS=$((ERRORS + 1))
 fi
 
-echo -n "Checking Markdown formatting... $(echo ./*.md) "
-if prettier --log-level warn --check ./*.md; then
+echo -n "Checking Markdown formatting... ${MARKDOWN_FILES[*]} "
+if prettier --log-level warn --check "${MARKDOWN_FILES[@]}"; then
 	echo "OK!"
 else
 	echo "prettier check for Markdown failed"
 	ERRORS=$((ERRORS + 1))
 fi
 
-echo -n "Checking terminology... $(echo ./*.md) "
-if textlint --rule terminology ./*.md; then
+echo -n "Checking terminology... ${MARKDOWN_FILES[*]} "
+if textlint --rule terminology "${MARKDOWN_FILES[@]}"; then
 	echo "OK!"
 else
 	echo "textlint check failed"
@@ -208,11 +226,17 @@ else
 	ERRORS=$((ERRORS + 1))
 fi
 
-echo -n "Checking GitHub Actions security... $(echo .github/workflows/*.yml) "
-if zizmor .github/workflows/*.yml; then
+echo -n "Checking GitHub Actions security with zizmor... "
+if zizmor --offline .github/workflows/*.yml; then
 	echo "OK!"
 else
 	echo "zizmor check failed!"
+	ERRORS=$((ERRORS + 1))
+fi
+
+echo "Checking GitHub Actions security with checkov..."
+if ! checkov --framework github_actions --directory .github/workflows --compact --quiet; then
+	echo "checkov check failed!"
 	ERRORS=$((ERRORS + 1))
 fi
 

@@ -1,5 +1,6 @@
-**/.claude/settings.local.json
 *.elc
+*~
+/.DS_Store
 *-autoloads.el
 *-pkg.el
 
@@ -9,3 +10,6 @@ dist/
 
 # Planning documents
 jsonrpc-error-counter.patch
+
+# Local Claude settings
+**/.claude/settings.local.json
