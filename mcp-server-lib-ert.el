@@ -1,4 +1,5 @@
 ;;; mcp-server-lib-ert.el --- ERT test utilities for MCP server -*- lexical-binding: t; -*-
+;; jscpd:ignore-start
 
 ;; Copyright (C) 2025-2026 Laurynas Biveinis
 
@@ -25,6 +26,8 @@
 ;;; Commentary:
 
 ;; Test utilities for writing ERT tests for MCP servers.
+
+;; jscpd:ignore-end
 
 ;;; Code:
 

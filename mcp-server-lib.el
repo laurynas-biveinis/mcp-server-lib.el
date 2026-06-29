@@ -1,4 +1,5 @@
 ;;; mcp-server-lib.el --- Model Context Protocol server library -*- lexical-binding: t; -*-
+;; jscpd:ignore-start
 
 ;; Copyright (C) 2025-2026 Laurynas Biveinis
 
@@ -44,6 +45,8 @@
 ;; registration, and provides error handling suitable for LLM interactions.
 ;;
 ;; See https://modelcontextprotocol.io/ for the protocol specification.
+
+;; jscpd:ignore-end
 
 ;;; Code:
 
@@ -404,7 +407,7 @@ TABLE; both preconditions are enforced by `cl-assert'."
 ENTRY is consumed only when KEY is absent from TABLE; otherwise the
 existing entry's `:ref-count' is incremented in place."
   (if-let* ((existing (gethash key table)))
-      (mcp-server-lib--bump-ref-count existing)
+    (mcp-server-lib--bump-ref-count existing)
     (mcp-server-lib--register-new key entry table)))
 
 (defun mcp-server-lib--ref-counted-unregister (key table)
@@ -475,8 +478,8 @@ typos like a trailing key with no value, or a dotted property tail).
 Duplicate keys are also rejected (catches typos like a property
 re-added without removing the old one)."
   (if-let* ((len (proper-list-p properties)))
-      (unless (zerop (mod len 2))
-        (error "%s: property list has odd length" entity))
+    (unless (zerop (mod len 2))
+      (error "%s: property list has odd length" entity))
     (error "%s: property list must be a proper list" entity))
   (let ((p properties)
         seen)
@@ -759,43 +762,43 @@ Supports RFC 6570 simple variables {var} and reserved expansion {+var}."
     ;; Process template character by character
     (while (< pos len)
       (if-let* ((var-start (string-match "{" template pos)))
-          ;; Found variable start
-          (progn
-            ;; Add literal segment before variable if any
-            (when (> var-start pos)
-              (push (list
-                     :type 'literal
-                     :value (substring template pos var-start))
-                    segments))
-            ;; Find variable end (guaranteed to exist due to balance check)
-            (let* ((var-end (string-match "}" template var-start))
-                   ;; Extract variable content
-                   (var-content
-                    (substring template (1+ var-start) var-end))
-                   (reserved
-                    (and (> (length var-content) 0)
-                         (eq (aref var-content 0) ?+)))
-                   (var-name
-                    (if reserved
-                        (substring var-content 1)
-                      var-content)))
-              ;; Validate variable name
-              ;; RFC 6570: Variable names must start with ALPHA / "_"
-              ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
-              (unless (string-match-p
-                       "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
-                (error
-                 "Invalid variable name '%s' in resource template: %s"
-                 var-name
-                 template))
-              ;; Add variable segment
-              (push (list
-                     :type 'variable
-                     :name var-name
-                     :reserved reserved)
-                    segments)
-              (push var-name variables)
-              (setq pos (1+ var-end))))
+        ;; Found variable start
+        (progn
+          ;; Add literal segment before variable if any
+          (when (> var-start pos)
+            (push (list
+                   :type 'literal
+                   :value (substring template pos var-start))
+                  segments))
+          ;; Find variable end (guaranteed to exist due to balance check)
+          (let* ((var-end (string-match "}" template var-start))
+                 ;; Extract variable content
+                 (var-content
+                  (substring template (1+ var-start) var-end))
+                 (reserved
+                  (and (> (length var-content) 0)
+                       (eq (aref var-content 0) ?+)))
+                 (var-name
+                  (if reserved
+                      (substring var-content 1)
+                    var-content)))
+            ;; Validate variable name
+            ;; RFC 6570: Variable names must start with ALPHA / "_"
+            ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
+            (unless (string-match-p
+                     "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
+              (error
+               "Invalid variable name '%s' in resource template: %s"
+               var-name
+               template))
+            ;; Add variable segment
+            (push (list
+                   :type 'variable
+                   :name var-name
+                   :reserved reserved)
+                  segments)
+            (push var-name variables)
+            (setq pos (1+ var-end))))
         ;; No more variables, add remaining literal
         (when (< pos len)
           (push (list :type 'literal :value (substring template pos))
@@ -1499,14 +1502,14 @@ See also: `mcp-server-lib-unregister-server'."
     ;; validation/build phase above.  Order of updates here is not
     ;; observable.
     (if-let* ((existing (gethash id mcp-server-lib--servers)))
-        (progn
-          (mcp-server-lib--bump-ref-count existing)
-          (when (plist-member properties :name)
-            (plist-put existing :name name))
-          (when (plist-member properties :version)
-            (plist-put existing :version version))
-          (when (plist-member properties :instructions)
-            (plist-put existing :instructions instructions)))
+      (progn
+        (mcp-server-lib--bump-ref-count existing)
+        (when (plist-member properties :name)
+          (plist-put existing :name name))
+        (when (plist-member properties :version)
+          (plist-put existing :version version))
+        (when (plist-member properties :instructions)
+          (plist-put existing :instructions instructions)))
       (let ((record (list :ref-count 1 :name name :version version)))
         (when (plist-member properties :instructions)
           (plist-put record :instructions instructions))
@@ -1714,6 +1717,23 @@ Example:
 
 ;;; API - Tools (obsolete)
 
+(defun mcp-server-lib--obsolete-register-server-id
+    (properties allowed kind)
+  "Validate PROPERTIES of an obsolete registration and return the server ID.
+ALLOWED is the list of permitted property keys.  KIND is a capitalized
+noun naming the spec (\"Tool\" or \"Resource\") used to build the
+validation prefix \"KIND spec\" and the `:server-id' type-error message.
+Signal an error on an unknown or duplicate key, or when `:server-id' is
+present but not a string.  Return the `:server-id' value, defaulting to
+\"default\"."
+  (mcp-server-lib--validate-property-keys
+   properties allowed (concat kind " spec"))
+  (let ((sid (plist-get properties :server-id)))
+    (when (and sid (not (stringp sid)))
+      (error
+       "%s registration requires :server-id to be a string" kind)))
+  (or (plist-get properties :server-id) "default"))
+
 (defun mcp-server-lib-register-tool (handler &rest properties)
   "Register a tool with the MCP server.
 
@@ -1769,16 +1789,12 @@ MCP Parameters:
     :description \"Read contents of a file\")
 
 See also: `mcp-server-lib-register-server'"
-  ;; Catches duplicate/trailing :server-id (masked by --plist-remove below).
-  (mcp-server-lib--validate-property-keys
-   properties
-   '(:id :description :title :read-only :server-id)
-   "Tool spec")
-  (let ((sid (plist-get properties :server-id)))
-    (when (and sid (not (stringp sid)))
-      (error "Tool registration requires :server-id to be a string")))
   ;; See `mcp-server-lib--servers' docstring for why this is untouched.
-  (let* ((server-id (or (plist-get properties :server-id) "default"))
+  (let* ((server-id
+          (mcp-server-lib--obsolete-register-server-id
+           properties
+           '(:id :description :title :read-only :server-id)
+           "Tool"))
          (spec
           (cons
            handler
@@ -1869,18 +1885,15 @@ Examples:
    :name \"Org file outline\"
    :description \"Hierarchical outline of an Org file\")
 
-See also: `mcp-server-lib-register-server'"
-  ;; Catches duplicate/trailing :server-id (masked by --plist-remove below).
-  (mcp-server-lib--validate-property-keys
-   properties
-   '(:name :description :mime-type :server-id)
-   "Resource spec")
-  (let ((sid (plist-get properties :server-id)))
-    (when (and sid (not (stringp sid)))
-      (error
-       "Resource registration requires :server-id to be a string")))
-  ;; See `mcp-server-lib--servers' docstring for why this is untouched.
-  (let* ((server-id (or (plist-get properties :server-id) "default"))
+See also: `mcp-server-lib-register-tool',
+`mcp-server-lib-register-server'"
+  ;; The per-server record is left intact; consult the
+  ;; `mcp-server-lib--servers' docstring for the rationale.
+  (let* ((server-id
+          (mcp-server-lib--obsolete-register-server-id
+           properties
+           '(:name :description :mime-type :server-id)
+           "Resource"))
          (spec
           (cons
            uri
@@ -1899,25 +1912,14 @@ See also: `mcp-server-lib-register-server'"
 (defun mcp-server-lib-unregister-resource (uri &optional server-id)
   "Unregister a resource by its URI.
 
-This function is obsolete as of 0.3.0.  No per-key replacement: pair
-each `mcp-server-lib-register-server' with one
-`mcp-server-lib-unregister-server' (which tears down every entry the
-bundled call registered).
-
-This decrements URI's reference count only; the per-server metadata
-record created by `mcp-server-lib-register-server' (if any) is left in
-place.  Use `mcp-server-lib-unregister-server' to clear the record as
-well.
-
-Automatically detects whether URI is a template based on presence of {}.
+Obsolete as of 0.3.0; see `mcp-server-lib-unregister-tool' for the
+deprecation and reference-count semantics, which apply here as well.
+URI may be a plain URI or a template (auto-detected by the presence of
+braces).
 
 Arguments:
   URI       The URI or URI template to unregister
   SERVER-ID Server identifier (optional, defaults to \"default\")
-
-Returns t if URI was found (its reference count was decremented, or
-the entry was removed when the count reached zero); nil if no such
-resource exists.
 
 Examples:
   (mcp-server-lib-unregister-resource \"org://projects.org\")
