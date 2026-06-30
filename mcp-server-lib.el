@@ -1,4 +1,5 @@
 ;;; mcp-server-lib.el --- Model Context Protocol server library -*- lexical-binding: t; -*-
+;; jscpd:ignore-start
 
 ;; Copyright (C) 2025-2026 Laurynas Biveinis
 
@@ -44,6 +45,8 @@
 ;; registration, and provides error handling suitable for LLM interactions.
 ;;
 ;; See https://modelcontextprotocol.io/ for the protocol specification.
+
+;; jscpd:ignore-end
 
 ;;; Code:
 
@@ -1714,6 +1717,23 @@ Example:
 
 ;;; API - Tools (obsolete)
 
+(defun mcp-server-lib--obsolete-register-server-id
+    (properties allowed kind)
+  "Validate PROPERTIES of an obsolete registration and return the server ID.
+ALLOWED is the list of permitted property keys.  KIND is a capitalized
+noun naming the spec (\"Tool\" or \"Resource\") used to build the
+validation prefix \"KIND spec\" and the `:server-id' type-error message.
+Signal an error on an unknown or duplicate key, or when `:server-id' is
+present but not a string.  Return the `:server-id' value, defaulting to
+\"default\"."
+  (mcp-server-lib--validate-property-keys
+   properties allowed (concat kind " spec"))
+  (let ((sid (plist-get properties :server-id)))
+    (when (and sid (not (stringp sid)))
+      (error
+       "%s registration requires :server-id to be a string" kind)))
+  (or (plist-get properties :server-id) "default"))
+
 (defun mcp-server-lib-register-tool (handler &rest properties)
   "Register a tool with the MCP server.
 
@@ -1769,16 +1789,12 @@ MCP Parameters:
     :description \"Read contents of a file\")
 
 See also: `mcp-server-lib-register-server'"
-  ;; Catches duplicate/trailing :server-id (masked by --plist-remove below).
-  (mcp-server-lib--validate-property-keys
-   properties
-   '(:id :description :title :read-only :server-id)
-   "Tool spec")
-  (let ((sid (plist-get properties :server-id)))
-    (when (and sid (not (stringp sid)))
-      (error "Tool registration requires :server-id to be a string")))
   ;; See `mcp-server-lib--servers' docstring for why this is untouched.
-  (let* ((server-id (or (plist-get properties :server-id) "default"))
+  (let* ((server-id
+          (mcp-server-lib--obsolete-register-server-id
+           properties
+           '(:id :description :title :read-only :server-id)
+           "Tool"))
          (spec
           (cons
            handler
@@ -1869,18 +1885,15 @@ Examples:
    :name \"Org file outline\"
    :description \"Hierarchical outline of an Org file\")
 
-See also: `mcp-server-lib-register-server'"
-  ;; Catches duplicate/trailing :server-id (masked by --plist-remove below).
-  (mcp-server-lib--validate-property-keys
-   properties
-   '(:name :description :mime-type :server-id)
-   "Resource spec")
-  (let ((sid (plist-get properties :server-id)))
-    (when (and sid (not (stringp sid)))
-      (error
-       "Resource registration requires :server-id to be a string")))
-  ;; See `mcp-server-lib--servers' docstring for why this is untouched.
-  (let* ((server-id (or (plist-get properties :server-id) "default"))
+See also: `mcp-server-lib-register-tool',
+`mcp-server-lib-register-server'"
+  ;; The per-server record is left intact; consult the
+  ;; `mcp-server-lib--servers' docstring for the rationale.
+  (let* ((server-id
+          (mcp-server-lib--obsolete-register-server-id
+           properties
+           '(:name :description :mime-type :server-id)
+           "Resource"))
          (spec
           (cons
            uri
@@ -1899,25 +1912,14 @@ See also: `mcp-server-lib-register-server'"
 (defun mcp-server-lib-unregister-resource (uri &optional server-id)
   "Unregister a resource by its URI.
 
-This function is obsolete as of 0.3.0.  No per-key replacement: pair
-each `mcp-server-lib-register-server' with one
-`mcp-server-lib-unregister-server' (which tears down every entry the
-bundled call registered).
-
-This decrements URI's reference count only; the per-server metadata
-record created by `mcp-server-lib-register-server' (if any) is left in
-place.  Use `mcp-server-lib-unregister-server' to clear the record as
-well.
-
-Automatically detects whether URI is a template based on presence of {}.
+Obsolete as of 0.3.0; see `mcp-server-lib-unregister-tool' for the
+deprecation and reference-count semantics, which apply here as well.
+URI may be a plain URI or a template (auto-detected by the presence of
+braces).
 
 Arguments:
   URI       The URI or URI template to unregister
   SERVER-ID Server identifier (optional, defaults to \"default\")
-
-Returns t if URI was found (its reference count was decremented, or
-the entry was removed when the count reached zero); nil if no such
-resource exists.
 
 Examples:
   (mcp-server-lib-unregister-resource \"org://projects.org\")

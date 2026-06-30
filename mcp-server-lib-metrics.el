@@ -1,4 +1,5 @@
 ;;; mcp-server-lib-metrics.el --- Metrics collection for MCP server -*- lexical-binding: t; -*-
+;; jscpd:ignore-start
 
 ;; Copyright (C) 2025-2026 Laurynas Biveinis
 
@@ -22,6 +23,8 @@
 ;; This file provides metrics collection functionality for the MCP server.
 ;; It tracks usage statistics for all MCP operations including tools,
 ;; resources, and prompts.
+
+;; jscpd:ignore-end
 
 ;;; Code:
 

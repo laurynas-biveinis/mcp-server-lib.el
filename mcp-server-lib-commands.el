@@ -1,4 +1,5 @@
 ;;; mcp-server-lib-commands.el --- User commands for MCP server -*- lexical-binding: t; -*-
+;; jscpd:ignore-start
 
 ;; Copyright (C) 2025-2026 Laurynas Biveinis
 
@@ -22,6 +23,8 @@
 ;;; Commentary:
 
 ;; This file provides interactive user commands for the MCP server library.
+
+;; jscpd:ignore-end
 
 ;;; Code:
 
@@ -294,43 +297,38 @@ ENTRY is (TOOL-ID . TOOL-PLIST)."
     (insert (format "%s  Handler: %s\n" indent handler-name))
     (mcp-server-lib--insert-usage-metrics metrics indent)))
 
+(defun mcp-server-lib--describe-resource-like (entry indent)
+  "Render the fields shared by resources and templates with INDENT prefix.
+ENTRY is (URI . PLIST) carrying `:name', `:description', `:mime-type',
+and `:handler'.  Emits the URI line, item properties, and handler line."
+  (let ((uri (car entry))
+        (plist (cdr entry)))
+    (insert (format "%s%s\n" indent uri))
+    (mcp-server-lib--insert-item-properties
+     (plist-get plist :name)
+     (plist-get plist :description)
+     (list :mime-type (or (plist-get plist :mime-type) "text/plain"))
+     indent)
+    (insert
+     (format "%s  Handler: %s\n"
+             indent
+             (mcp-server-lib--get-handler-name
+              (plist-get plist :handler))))))
+
 (defun mcp-server-lib--describe-resource (entry indent)
   "Render resource ENTRY into the current buffer with INDENT prefix.
 ENTRY is (URI . RESOURCE-PLIST)."
-  (let* ((uri (car entry))
-         (resource (cdr entry))
-         (name (plist-get resource :name))
-         (description (plist-get resource :description))
-         (mime-type (or (plist-get resource :mime-type) "text/plain"))
-         (handler (plist-get resource :handler))
-         (handler-name (mcp-server-lib--get-handler-name handler))
-         (metrics-key (format "resources/read:%s" uri))
-         (metrics
-          (gethash metrics-key mcp-server-lib-metrics--table)))
-    (insert (format "%s%s\n" indent uri))
-    (mcp-server-lib--insert-item-properties name description
-                                            (list
-                                             :mime-type mime-type)
-                                            indent)
-    (insert (format "%s  Handler: %s\n" indent handler-name))
+  (mcp-server-lib--describe-resource-like entry indent)
+  (let ((metrics
+         (gethash
+          (format "resources/read:%s" (car entry))
+          mcp-server-lib-metrics--table)))
     (mcp-server-lib--insert-usage-metrics metrics indent)))
 
 (defun mcp-server-lib--describe-resource-template (entry indent)
   "Render resource-template ENTRY into the current buffer with INDENT prefix.
 ENTRY is (URI . TEMPLATE-PLIST).  Templates have no per-URI metrics."
-  (let* ((uri (car entry))
-         (template (cdr entry))
-         (name (plist-get template :name))
-         (description (plist-get template :description))
-         (mime-type (or (plist-get template :mime-type) "text/plain"))
-         (handler (plist-get template :handler))
-         (handler-name (mcp-server-lib--get-handler-name handler)))
-    (insert (format "%s%s\n" indent uri))
-    (mcp-server-lib--insert-item-properties name description
-                                            (list
-                                             :mime-type mime-type)
-                                            indent)
-    (insert (format "%s  Handler: %s\n" indent handler-name))))
+  (mcp-server-lib--describe-resource-like entry indent))
 
 (defun mcp-server-lib--describe-server (server-id)
   "Render the per-server block for SERVER-ID into the current buffer.
