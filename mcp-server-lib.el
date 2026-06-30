@@ -407,7 +407,7 @@ TABLE; both preconditions are enforced by `cl-assert'."
 ENTRY is consumed only when KEY is absent from TABLE; otherwise the
 existing entry's `:ref-count' is incremented in place."
   (if-let* ((existing (gethash key table)))
-    (mcp-server-lib--bump-ref-count existing)
+      (mcp-server-lib--bump-ref-count existing)
     (mcp-server-lib--register-new key entry table)))
 
 (defun mcp-server-lib--ref-counted-unregister (key table)
@@ -478,8 +478,8 @@ typos like a trailing key with no value, or a dotted property tail).
 Duplicate keys are also rejected (catches typos like a property
 re-added without removing the old one)."
   (if-let* ((len (proper-list-p properties)))
-    (unless (zerop (mod len 2))
-      (error "%s: property list has odd length" entity))
+      (unless (zerop (mod len 2))
+        (error "%s: property list has odd length" entity))
     (error "%s: property list must be a proper list" entity))
   (let ((p properties)
         seen)
@@ -762,43 +762,43 @@ Supports RFC 6570 simple variables {var} and reserved expansion {+var}."
     ;; Process template character by character
     (while (< pos len)
       (if-let* ((var-start (string-match "{" template pos)))
-        ;; Found variable start
-        (progn
-          ;; Add literal segment before variable if any
-          (when (> var-start pos)
-            (push (list
-                   :type 'literal
-                   :value (substring template pos var-start))
-                  segments))
-          ;; Find variable end (guaranteed to exist due to balance check)
-          (let* ((var-end (string-match "}" template var-start))
-                 ;; Extract variable content
-                 (var-content
-                  (substring template (1+ var-start) var-end))
-                 (reserved
-                  (and (> (length var-content) 0)
-                       (eq (aref var-content 0) ?+)))
-                 (var-name
-                  (if reserved
-                      (substring var-content 1)
-                    var-content)))
-            ;; Validate variable name
-            ;; RFC 6570: Variable names must start with ALPHA / "_"
-            ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
-            (unless (string-match-p
-                     "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
-              (error
-               "Invalid variable name '%s' in resource template: %s"
-               var-name
-               template))
-            ;; Add variable segment
-            (push (list
-                   :type 'variable
-                   :name var-name
-                   :reserved reserved)
-                  segments)
-            (push var-name variables)
-            (setq pos (1+ var-end))))
+          ;; Found variable start
+          (progn
+            ;; Add literal segment before variable if any
+            (when (> var-start pos)
+              (push (list
+                     :type 'literal
+                     :value (substring template pos var-start))
+                    segments))
+            ;; Find variable end (guaranteed to exist due to balance check)
+            (let* ((var-end (string-match "}" template var-start))
+                   ;; Extract variable content
+                   (var-content
+                    (substring template (1+ var-start) var-end))
+                   (reserved
+                    (and (> (length var-content) 0)
+                         (eq (aref var-content 0) ?+)))
+                   (var-name
+                    (if reserved
+                        (substring var-content 1)
+                      var-content)))
+              ;; Validate variable name
+              ;; RFC 6570: Variable names must start with ALPHA / "_"
+              ;; and contain only ALPHA / DIGIT / "_" / pct-encoded
+              (unless (string-match-p
+                       "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
+                (error
+                 "Invalid variable name '%s' in resource template: %s"
+                 var-name
+                 template))
+              ;; Add variable segment
+              (push (list
+                     :type 'variable
+                     :name var-name
+                     :reserved reserved)
+                    segments)
+              (push var-name variables)
+              (setq pos (1+ var-end))))
         ;; No more variables, add remaining literal
         (when (< pos len)
           (push (list :type 'literal :value (substring template pos))
@@ -1502,14 +1502,14 @@ See also: `mcp-server-lib-unregister-server'."
     ;; validation/build phase above.  Order of updates here is not
     ;; observable.
     (if-let* ((existing (gethash id mcp-server-lib--servers)))
-      (progn
-        (mcp-server-lib--bump-ref-count existing)
-        (when (plist-member properties :name)
-          (plist-put existing :name name))
-        (when (plist-member properties :version)
-          (plist-put existing :version version))
-        (when (plist-member properties :instructions)
-          (plist-put existing :instructions instructions)))
+        (progn
+          (mcp-server-lib--bump-ref-count existing)
+          (when (plist-member properties :name)
+            (plist-put existing :name name))
+          (when (plist-member properties :version)
+            (plist-put existing :version version))
+          (when (plist-member properties :instructions)
+            (plist-put existing :instructions instructions)))
       (let ((record (list :ref-count 1 :name name :version version)))
         (when (plist-member properties :instructions)
           (plist-put record :instructions instructions))
