@@ -11,6 +11,7 @@
                                                  (mcp-server-lib-test--with-resources . 1)
                                                  (mcp-server-lib-test--with-undefined-function . 1)
                                                  (mcp-server-lib-test--with-request . defun)
+                                                 (mcp-server-lib-test--should-error-register . 1)
                                                  (mcp-server-lib-test--with-obsolete-tool-api . 0)
                                                  (mcp-server-lib-test--with-obsolete-resource-api . 0)
                                                  (mcp-server-lib-test--with-temp-install-dir . 0)
