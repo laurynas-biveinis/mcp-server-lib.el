@@ -174,8 +174,10 @@ to template-data.")
   "Hash table of registered MCP server records keyed by server-id.
 Values are plists with per-server metadata.  Required key `:ref-count'
 tracks how many `mcp-server-lib-register-server' calls are live for the
-server-id; the record is removed when this reaches zero.  Optional key
-`:instructions' holds a string emitted in the `initialize' response.
+server-id; the record is removed when this reaches zero.  Keys `:name'
+and `:version' hold the strings reported as `serverInfo' in the
+`initialize' response.  Optional key `:instructions' holds a string
+emitted in the same response.
 The obsolete `mcp-server-lib-register-tool' and
 `mcp-server-lib-register-resource' shims do not populate this table;
 `mcp-server-lib--all-server-ids' (in mcp-server-lib-commands.el)
@@ -1559,11 +1561,11 @@ regardless of how entries were registered, so this also clears entries
 registered via the obsolete `mcp-server-lib-register-tool' or
 `mcp-server-lib-register-resource'.
 
-The per-server metadata record (which holds optional `:instructions')
-has its reference count decremented exactly once and is removed when
-the count reaches zero — the same contract as tools, resources, and
-templates.  Its `:instructions' value is never reverted by this
-function; only `mcp-server-lib-register-server' updates it.
+The per-server metadata record (which holds `:name', `:version', and
+optional `:instructions') has its reference count decremented exactly
+once and is removed when the count reaches zero — the same contract as
+tools, resources, and templates.  Those values are never reverted by
+this function; only `mcp-server-lib-register-server' updates them.
 
 Calling this function on an unknown SERVER-ID is a silent no-op.
 

@@ -319,7 +319,7 @@ To tear down everything a package registered with a given server-id (for example
   (mcp-server-lib-unregister-server "my-server"))
 #+end_src
 
-Each registered entry — tools, resources, templates, and the per-server metadata record holding optional =:instructions= — has its reference count decremented exactly once. Entries whose count was one are fully removed; entries with a higher count (e.g. from nested test fixtures) remain at the reduced count. =:instructions= is never reverted by =mcp-server-lib-unregister-server=; only =mcp-server-lib-register-server= updates it. Calling =mcp-server-lib-unregister-server= on an unknown server-id is a silent no-op. Pass ="default"= explicitly to operate on the default server.
+Each registered entry — tools, resources, templates, and the per-server metadata record holding =:name=, =:version=, and optional =:instructions= — has its reference count decremented exactly once. Entries whose count was one are fully removed; entries with a higher count (e.g. from nested test fixtures) remain at the reduced count. =:name=, =:version=, and =:instructions= are never reverted by =mcp-server-lib-unregister-server=; only =mcp-server-lib-register-server= updates them. Calling =mcp-server-lib-unregister-server= on an unknown server-id is a silent no-op. Pass ="default"= explicitly to operate on the default server.
 
 *** Deprecated APIs
 
@@ -384,6 +384,8 @@ Test helper functions use the dynamic variable =mcp-server-lib-ert-server-id= to
 (setq mcp-server-lib-ert-server-id "my-mcp-server")
 #+end_src
 
+The constant =mcp-server-lib-ert-default-version= (="1.0.0-test"=) is the =:version= that test helpers register a server with when none is given, and the =serverInfo.version= they expect in the =initialize= result, so registration and assertion agree by default.
+
 **** Test Helper Functions
 
 #+begin_src elisp
@@ -436,6 +438,13 @@ Test helper functions use the dynamic variable =mcp-server-lib-ert-server-id= to
    (mimeType . "text/plain")
    (text . "test result")))
 
+;; Assert the structure of an initialize result
+(mcp-server-lib-ert-assert-initialize-result
+ init-result tools resources
+ :instructions "How to drive this server"
+ :name "My Server"
+ :version "1.2.0")
+
 ;; Run tests with MCP server
 (mcp-server-lib-ert-with-server :tools nil :resources nil
   ;; Server is started, initialized, and will be stopped after body
@@ -445,7 +454,15 @@ Test helper functions use the dynamic variable =mcp-server-lib-ert-server-id= to
                                   ("id" . 1)))
                    "example server")))
     (should-not (alist-get 'error response))))
+
+;; Same, against a non-default serverInfo
+(mcp-server-lib-ert-with-server :tools t :name "My Server" :version "1.2.0"
+  ...)
 #+end_src
+
+=mcp-server-lib-ert-assert-initialize-result= takes the initialize result, a boolean for the expected tools capability, and a boolean for the expected resources capability. =:instructions= asserts the field equals that string, or that it is absent when omitted; =:name= defaults to =mcp-server-lib-ert-server-id= and =:version= to =mcp-server-lib-ert-default-version=.
+
+=mcp-server-lib-ert-with-server= accepts the same three keywords and asserts them against the result of the initialize handshake it performs. If nothing is registered under =mcp-server-lib-ert-server-id= it registers a minimal server with those values and tears it down afterwards; a server the test registered itself is left untouched. Unknown keywords, or a trailing keyword with no value, signal an error at macro-expansion time.
 
 *** JSON-RPC Error Constants
 
