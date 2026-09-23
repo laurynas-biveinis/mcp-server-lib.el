@@ -1,5 +1,26 @@
 mcp-server-lib.el NEWS -- history of user-visible changes
 
+* Changes in mcp-server-lib 0.5.0 (unreleased)
+
+** New Features
+
+*** Tool specs gained `:param-schemas' for per-parameter JSON types
+    Every tool parameter is published in `inputSchema' as
+    {"type": "string"} unless the tool spec declares otherwise.
+    `:param-schemas' is an alist mapping a parameter name to a JSON
+    schema fragment that replaces that default, e.g.
+    (("after" (type . ["string" "null"]))
+     ("fields" (type . "array") (items . ((type . "string"))))).
+    Schema-validating clients can then send null, arrays and objects
+    as such instead of as their JSON text.  The parameter description
+    still comes from the `MCP Parameters:' docstring block.  Unknown
+    or duplicate names, malformed fragments and a fragment setting
+    `description' signal an error at registration.  Accepted by
+    `mcp-server-lib-register-server' `:tools' specs and by the
+    obsolete `mcp-server-lib-register-tool'.  Argument decoding is
+    unchanged: null arrives as nil, an array as a vector and an
+    object as an alist.
+
 * Changes in mcp-server-lib 0.4.0 (2026-08-19)
 
 ** Breaking Changes

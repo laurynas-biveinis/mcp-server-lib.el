@@ -5,7 +5,7 @@
 
 ;; Author: Laurynas Biveinis <laurynas.biveinis@gmail.com>
 ;; Keywords: comm, tools
-;; Version: 0.4.0
+;; Version: 0.5.0
 ;; Package-Requires: ((emacs "27.1"))
 ;; URL: https://github.com/laurynas-biveinis/mcp-server-lib.el
 
@@ -336,13 +336,63 @@ doesn't match function arguments, or if any parameter is not documented."
              arg-name)))))
     descriptions))
 
-(defun mcp-server-lib--generate-schema-from-function (func)
+(defun mcp-server-lib--validate-param-schemas (param-schemas arglist)
+  "Signal an error unless PARAM-SCHEMAS is valid for ARGLIST.
+PARAM-SCHEMAS is a tool's `:param-schemas' value: an alist mapping
+parameter name strings to JSON schema fragments.  Each name must occur
+once and name a parameter in ARGLIST.  Each fragment must be a
+non-empty alist and must not set `description', which comes from the
+handler's `MCP Parameters:' docstring block."
+  (unless (proper-list-p param-schemas)
+    (error "Tool :param-schemas must be a list"))
+  (let ((seen nil))
+    (dolist (entry param-schemas)
+      (unless (and (consp entry) (stringp (car entry)))
+        (error "Tool :param-schemas names must be strings, got %S"
+               entry))
+      (let ((param-name (car entry))
+            (schema (cdr entry)))
+        (when (member param-name seen)
+          (error "Duplicate parameter '%s' in :param-schemas"
+                 param-name))
+        (push param-name seen)
+        (unless (and
+                 (not (string= param-name "&optional"))
+                 (cl-member
+                  param-name
+                  arglist
+                  :test #'mcp-server-lib--param-name-matches-arg-p))
+          (error
+           "Parameter '%s' in :param-schemas not in function args %S"
+           param-name arglist))
+        (unless (and (consp schema)
+                     (proper-list-p schema)
+                     (cl-every #'consp schema))
+          (error
+           "Tool :param-schemas schema for '%s' must be a non-empty alist"
+           param-name))
+        (when (cl-some
+               (lambda (field)
+                 (string= (format "%s" (car field)) "description"))
+               schema)
+          (error
+           "Tool :param-schemas schema for '%s' must not set description; \
+document the parameter under MCP Parameters"
+           param-name))))))
+
+(defun mcp-server-lib--generate-schema-from-function
+    (func &optional param-schemas)
   "Generate JSON schema by analyzing FUNC's signature.
 Returns a schema object suitable for tool registration.
-Extracts parameter descriptions from the docstring if available."
+Extracts parameter descriptions from the docstring if available.
+PARAM-SCHEMAS is an alist mapping parameter names to JSON schema
+fragments, validated by `mcp-server-lib--validate-param-schemas'.
+A declared parameter publishes its fragment in place of the default
+string type."
   (let ((arglist (help-function-arglist func t)))
     (when (memq '&rest arglist)
       (error "MCP tool handlers do not support &rest parameters"))
+    (mcp-server-lib--validate-param-schemas param-schemas arglist)
     (let*
         ( ;; Use RAW=t to prevent substitute-command-keys from converting
          ;; apostrophes to fancy quotes, preserving exact documentation text
@@ -363,7 +413,9 @@ Extracts parameter descriptions from the docstring if available."
                   ;; Regular parameter - add to properties
                   (let* ((description
                           (cdr (assoc param-name param-descriptions)))
-                         (property-schema `((type . "string"))))
+                         (property-schema
+                          (or (cdr (assoc param-name param-schemas))
+                              '((type . "string")))))
                     ;; Add description if provided
                     (when description
                       (setq property-schema
@@ -610,9 +662,9 @@ Returns a JSON-RPC formatted response string, or nil for notifications."
 (defun mcp-server-lib--build-tool-entry (spec)
   "Validate SPEC and build a tool registry entry from it.
 SPEC is a list whose car is the handler function and whose cdr is a
-property list with required :id and :description and optional :title
-and :read-only.  SPEC must not include :server-id; the server-id is
-supplied separately by the caller.
+property list with required :id and :description and optional :title,
+:read-only and :param-schemas.  SPEC must not include :server-id;
+the server-id is supplied separately by the caller.
 
 Returns a cons cell (ID . ENTRY), where ID is the tool's :id and
 ENTRY is the plist to register under that id.  Signals an error on
@@ -624,7 +676,9 @@ bad input; in that case nothing has been mutated."
     (unless (functionp handler)
       (error "Tool registration requires handler function"))
     (mcp-server-lib--validate-property-keys
-     properties '(:id :description :title :read-only) "Tool spec")
+     properties
+     '(:id :description :title :read-only :param-schemas)
+     "Tool spec")
     (let ((id (plist-get properties :id))
           (description (plist-get properties :description))
           (title (plist-get properties :title)))
@@ -647,7 +701,8 @@ bad input; in that case nothing has been mutated."
               :handler handler
               :schema
               (mcp-server-lib--generate-schema-from-function
-               handler))))
+               handler
+               (plist-get properties :param-schemas)))))
         (when title
           (setq entry (plist-put entry :title title)))
         ;; Always include :read-only if it was specified, even if nil
@@ -1383,11 +1438,15 @@ PROPERTIES is a plist that may include:
                  emitted with that value.
   :tools         Optional list of tool specs.  Each spec is
                  `(HANDLER :id STR :description STR
-                 [:title STR] [:read-only BOOL])'.
+                 [:title STR] [:read-only BOOL]
+                 [:param-schemas ALIST])'.
                  :description should describe the tool as a whole;
                  per-parameter text belongs in the handler's
                  `MCP Parameters:' docstring block (extracted into
                  inputSchema), not here.
+                 :param-schemas maps parameter names to JSON schema
+                 fragments that replace the default string type,
+                 e.g. \\='((\"after\" (type . [\"string\" \"null\"]))).
                  Specs must not include :server-id.
   :resources     Optional list of resource specs.  Each spec is
                  `(URI HANDLER :name STR
@@ -1758,6 +1817,8 @@ Required properties:
 Optional properties:
   :title           User-friendly display name for the tool
   :read-only       If true, indicates tool doesn't modify its environment
+  :param-schemas   Alist mapping parameter names to JSON schema
+                   fragments that replace the default string type
   :server-id       Server identifier (defaults to \"default\")
 
 The HANDLER function's signature determines its input schema.
@@ -1795,7 +1856,12 @@ See also: `mcp-server-lib-register-server'"
   (let* ((server-id
           (mcp-server-lib--obsolete-register-server-id
            properties
-           '(:id :description :title :read-only :server-id)
+           '(:id
+             :description
+             :title
+             :read-only
+             :param-schemas
+             :server-id)
            "Tool"))
          (spec
           (cons
