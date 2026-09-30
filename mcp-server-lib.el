@@ -341,8 +341,10 @@ doesn't match function arguments, or if any parameter is not documented."
 PARAM-SCHEMAS is a tool's `:param-schemas' value: an alist mapping
 parameter name strings to JSON schema fragments.  Each name must occur
 once and name a parameter in ARGLIST.  Each fragment must be a
-non-empty alist and must not set `description', which comes from the
-handler's `MCP Parameters:' docstring block."
+non-empty alist that `json-encode' accepts, since `tools/list' encodes
+it with that, and must not set `description', which comes from the
+handler's `MCP Parameters:' docstring block.  A `type' in the fragment
+must be valid per `mcp-server-lib--schema-type-p'."
   (unless (proper-list-p param-schemas)
     (error "Tool :param-schemas must be a list"))
   (let ((seen nil))
@@ -371,14 +373,47 @@ handler's `MCP Parameters:' docstring block."
           (error
            "Tool :param-schemas schema for '%s' must be a non-empty alist"
            param-name))
-        (when (cl-some
-               (lambda (field)
-                 (string= (format "%s" (car field)) "description"))
-               schema)
+        (condition-case nil
+            (json-encode schema)
+          (error
+           (error
+            "Tool :param-schemas schema for '%s' is not JSON-encodable: %S"
+            param-name schema)))
+        (when (mcp-server-lib--schema-field schema "description")
           (error
            "Tool :param-schemas schema for '%s' must not set description; \
 document the parameter under MCP Parameters"
-           param-name))))))
+           param-name))
+        (when-let* ((type
+                     (mcp-server-lib--schema-field schema "type")))
+          (unless (mcp-server-lib--schema-type-p (cdr type))
+            (error
+             "Tool :param-schemas schema for '%s' has an invalid type: %S"
+             param-name (cdr type))))))))
+
+(defun mcp-server-lib--schema-field (schema name)
+  "Return the field of SCHEMA, an alist, whose key is spelled NAME.
+The key may be a symbol or a string, as `json-encode' accepts both."
+  (cl-find
+   name
+   schema
+   :key (lambda (field) (format "%s" (car field)))
+   :test #'string=))
+
+(defconst mcp-server-lib--schema-types
+  '("string" "number" "integer" "boolean" "array" "object" "null")
+  "The JSON Schema primitive type names.")
+
+(defun mcp-server-lib--schema-type-p (type)
+  "Return non-nil if TYPE is a valid JSON Schema `type' value.
+That is one primitive type name, or a non-empty vector of distinct
+ones, the form `json-encode' writes as a JSON array."
+  (if (vectorp type)
+      (let ((names (append type nil)))
+        (and names
+             (cl-every #'mcp-server-lib--schema-type-p names)
+             (equal names (delete-dups (copy-sequence names)))))
+    (and (stringp type) (member type mcp-server-lib--schema-types))))
 
 (defun mcp-server-lib--generate-schema-from-function
     (func &optional param-schemas)
@@ -1817,8 +1852,6 @@ Required properties:
 Optional properties:
   :title           User-friendly display name for the tool
   :read-only       If true, indicates tool doesn't modify its environment
-  :param-schemas   Alist mapping parameter names to JSON schema
-                   fragments that replace the default string type
   :server-id       Server identifier (defaults to \"default\")
 
 The HANDLER function's signature determines its input schema.
@@ -1856,12 +1889,7 @@ See also: `mcp-server-lib-register-server'"
   (let* ((server-id
           (mcp-server-lib--obsolete-register-server-id
            properties
-           '(:id
-             :description
-             :title
-             :read-only
-             :param-schemas
-             :server-id)
+           '(:id :description :title :read-only :server-id)
            "Tool"))
          (spec
           (cons

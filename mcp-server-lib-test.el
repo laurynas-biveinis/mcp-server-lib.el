@@ -2474,7 +2474,23 @@ Each case is (PARAM-SCHEMAS REGEXP): REGEXP must match the error."
                    ((("after" "null"))
                     "for .after. must be a non-empty alist")
                    ((("after" (type . "null") (description . "d")))
-                    "for .after. must not set description")))
+                    "for .after. must not set description")
+                   ((("after" (42 . "x")))
+                    "for .after. is not JSON-encodable")
+                   ((("fields"
+                      (type . "array")
+                      (items . ((7 . "x")))))
+                    "for .fields. is not JSON-encodable")
+                   ((("after" (type . 42)))
+                    "for .after. has an invalid type: 42")
+                   ((("after" (type . "nul")))
+                    "for .after. has an invalid type: \"nul\"")
+                   ((("after" (type . [])))
+                    "for .after. has an invalid type: \\[\\]")
+                   ((("after" (type . ["string" "string"])))
+                    "for .after. has an invalid type")
+                   ((("after" (type . ("string" "null"))))
+                    "for .after. has an invalid type")))
     (let ((err
            (should-error
             (mcp-server-lib-test--register-server
@@ -3639,32 +3655,6 @@ docstring description; an undeclared parameter stays a string, and
             (type . "object")))
          (alist-get 'properties schema)))
        (should (equal ["query"] (alist-get 'required schema)))))))
-
-(ert-deftest mcp-server-lib-test-register-tool-param-schemas ()
-  "Test that the obsolete `register-tool' shim accepts `:param-schemas'."
-  (with-suppressed-warnings ((obsolete
-                              mcp-server-lib-register-tool
-                              mcp-server-lib-unregister-tool))
-    (mcp-server-lib-register-tool
-     #'mcp-server-lib-test--tool-handler-typed-params
-     :id "typed-params"
-     :description "A tool with typed parameters"
-     :param-schemas mcp-server-lib-test--typed-param-schemas)
-    (unwind-protect
-        (mcp-server-lib-ert-with-server
-         :tools t
-         :resources nil
-         (mcp-server-lib-ert-verify-req-success
-          "tools/list"
-          (let* ((tool (aref (mcp-server-lib-test--get-tool-list) 0))
-                 (properties
-                  (alist-get
-                   'properties (alist-get 'inputSchema tool))))
-            (should
-             (equal
-              ["string" "null"]
-              (alist-get 'type (alist-get 'after properties)))))))
-      (mcp-server-lib-unregister-tool "typed-params"))))
 
 (ert-deftest mcp-server-lib-test-tools-call-param-schemas-decoding ()
   "Test that declared parameter types leave argument decoding unchanged.

@@ -236,6 +236,8 @@ fragment is encoded with =json-encode=, so JSON arrays are written as vectors.
 - The description still comes from the =MCP Parameters:= docstring block; a
   fragment that sets =description= is rejected.
 - Each name must be a handler parameter and may appear once.
+- Registration rejects a fragment =json-encode= cannot encode, and a =type=
+  that is neither a JSON Schema type name nor a vector of distinct ones.
 - =required= is still derived from the handler's arglist, so declaring a
   parameter's type does not change whether it is optional.
 - Declaring a type does not change how arguments reach the handler: JSON
