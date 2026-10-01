@@ -2489,6 +2489,8 @@ Each case is (PARAM-SCHEMAS REGEXP): REGEXP must match the error."
                     "for .after. has an invalid type: \\[\\]")
                    ((("after" (type . ["string" "string"])))
                     "for .after. has an invalid type")
+                   ((("after" (type . [["string"]])))
+                    "for .after. has an invalid type")
                    ((("after" (type . ("string" "null"))))
                     "for .after. has an invalid type")))
     (let ((err

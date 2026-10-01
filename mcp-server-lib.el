@@ -408,12 +408,15 @@ The key may be a symbol or a string, as `json-encode' accepts both."
   "Return non-nil if TYPE is a valid JSON Schema `type' value.
 That is one primitive type name, or a non-empty vector of distinct
 ones, the form `json-encode' writes as a JSON array."
-  (if (vectorp type)
-      (let ((names (append type nil)))
-        (and names
-             (cl-every #'mcp-server-lib--schema-type-p names)
-             (equal names (delete-dups (copy-sequence names)))))
-    (and (stringp type) (member type mcp-server-lib--schema-types))))
+  (let ((name-p
+         (lambda (name)
+           (and (stringp name) (member name mcp-server-lib--schema-types)))))
+    (if (vectorp type)
+        (let ((names (append type nil)))
+          (and names
+               (cl-every name-p names)
+               (equal names (delete-dups (copy-sequence names)))))
+      (funcall name-p type))))
 
 (defun mcp-server-lib--generate-schema-from-function
     (func &optional param-schemas)
