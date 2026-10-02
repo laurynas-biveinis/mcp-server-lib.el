@@ -396,6 +396,26 @@ MCP Parameters:
   param.name - parameter with dot"
   (format "Results: %s, %s, %s" param-name param_name param.name))
 
+(defun mcp-server-lib-test--tool-handler-typed-params
+    (query &optional after fields filter)
+  "Test handler for parameters declared with `:param-schemas'.
+QUERY, AFTER, FIELDS and FILTER are echoed back with `prin1'.
+
+MCP Parameters:
+  query - Search text
+  after - Cursor to resume from, or null for the first page
+  fields - Field names to return
+  filter - Property names mapped to required values"
+  (format "%S %S %S %S" query after fields filter))
+
+(defconst mcp-server-lib-test--typed-param-schemas
+  '(("after" (type . ["string" "null"]))
+    ("fields" (type . "array") (items . ((type . "string"))))
+    ("filter" (type . "object")))
+  "`:param-schemas' for `mcp-server-lib-test--tool-handler-typed-params'.
+Covers a union with null, an array with items, and an object;
+QUERY is left undeclared.")
+
 (defun mcp-server-lib-test--tool-handler-returns-list ()
   "Test tool handler returning a list."
   '("item1" "item2" "item3"))
@@ -2433,6 +2453,61 @@ the same generic unknown-property path as any other unaccepted key."
    :type 'error))
 
 (ert-deftest
+    mcp-server-lib-test-register-server-tool-bad-param-schemas
+    ()
+  "Tool spec with a malformed `:param-schemas' value is rejected.
+Each case is (PARAM-SCHEMAS REGEXP): REGEXP must match the error."
+  (pcase-dolist (`(,param-schemas ,regexp)
+                 '(("after" ":param-schemas must be a list")
+                   (((after (type . "null"))) "names must be strings")
+                   ((("before" (type . "null")))
+                    ".before. in :param-schemas not in")
+                   ((("&optional" (type . "null")))
+                    ".&optional. in :param-schemas not in")
+                   ((("after" (type . "null"))
+                     ("after" (type . "string")))
+                    "Duplicate parameter .after.")
+                   ((("after"))
+                    "for .after. must be a non-empty alist")
+                   ((("after" . "null"))
+                    "for .after. must be a non-empty alist")
+                   ((("after" "null"))
+                    "for .after. must be a non-empty alist")
+                   ((("after" (type . "null") (description . "d")))
+                    "for .after. must not set description")
+                   ((("after" (42 . "x")))
+                    "for .after. is not JSON-encodable")
+                   ((("fields"
+                      (type . "array")
+                      (items . ((7 . "x")))))
+                    "for .fields. is not JSON-encodable")
+                   ((("after" (type . 42)))
+                    "for .after. has an invalid type: 42")
+                   ((("after" (type . "nul")))
+                    "for .after. has an invalid type: \"nul\"")
+                   ((("after" (type . [])))
+                    "for .after. has an invalid type: \\[\\]")
+                   ((("after" (type . ["string" "string"])))
+                    "for .after. has an invalid type")
+                   ((("after" (type . [["string"]])))
+                    "for .after. has an invalid type")
+                   ((("after" (type . ("string" "null"))))
+                    "for .after. has an invalid type")))
+    (let ((err
+           (should-error
+            (mcp-server-lib-test--register-server
+             :id "default"
+             :tools
+             `((mcp-server-lib-test--tool-handler-typed-params
+                :id
+                "typed-params"
+                :description "A tool with typed parameters"
+                :param-schemas ,param-schemas)))
+            :type 'error)))
+      (should (string-match-p regexp (cadr err)))))
+  (should-not (mcp-server-lib-server-registered-p "default")))
+
+(ert-deftest
     mcp-server-lib-test-register-server-resource-inner-server-id-rejected
     ()
   "Resource spec containing :server-id is rejected.
@@ -3551,6 +3626,56 @@ Only the required parameter should be in the required array."
         ("optional-a" "string" "First optional parameter")
         ("optional-b" "string" "Second optional parameter"))
       '("optional-a" "optional-b")))))
+
+(ert-deftest mcp-server-lib-test-tools-list-schema-param-schemas ()
+  "Test that `:param-schemas' replaces the default string type.
+Declared parameters publish their schema fragment alongside the
+docstring description; an undeclared parameter stays a string, and
+`required' is still derived from the arglist."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-typed-params
+        :id "typed-params"
+        :description "A tool with typed parameters"
+        :param-schemas mcp-server-lib-test--typed-param-schemas))
+    (mcp-server-lib-ert-verify-req-success
+     "tools/list"
+     (let* ((tool (aref (mcp-server-lib-test--get-tool-list) 0))
+            (schema (alist-get 'inputSchema tool)))
+       (should
+        (equal
+         '((query (description . "Search text") (type . "string"))
+           (after
+            (description
+             . "Cursor to resume from, or null for the first page")
+            (type . ["string" "null"]))
+           (fields
+            (description . "Field names to return")
+            (type . "array")
+            (items (type . "string")))
+           (filter
+            (description . "Property names mapped to required values")
+            (type . "object")))
+         (alist-get 'properties schema)))
+       (should (equal ["query"] (alist-get 'required schema)))))))
+
+(ert-deftest mcp-server-lib-test-tools-call-param-schemas-decoding ()
+  "Test that declared parameter types leave argument decoding unchanged.
+JSON null reaches the handler as nil, an array as a vector and an
+object as an alist, exactly as for an undeclared parameter."
+  (mcp-server-lib-test--with-tools
+      ((#'mcp-server-lib-test--tool-handler-typed-params
+        :id "typed-params"
+        :description "A tool with typed parameters"
+        :param-schemas mcp-server-lib-test--typed-param-schemas))
+    (should
+     (string=
+      "\"q\" nil [\"a\" \"b\"] ((status . \"open\"))"
+      (mcp-server-lib-ert-call-tool
+       "typed-params"
+       '((query . "q")
+         (after . nil)
+         (fields . ["a" "b"])
+         (filter . ((status . "open")))))))))
 
 (ert-deftest mcp-server-lib-test-tools-call-two-param-handler ()
   "Test invoking a tool with two parameters."

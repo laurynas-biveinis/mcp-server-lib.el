@@ -208,8 +208,40 @@ Tool entry properties accepted in =:tools=:
   =:description= is redundant and risks drift.
 - =:title= - User-friendly display name
 - =:read-only= - Set to =t= if tool doesn't modify state
+- =:param-schemas= - Alist mapping parameter names to JSON schema fragments;
+  see [[*Parameter Types][Parameter Types]]
 
 Unknown or duplicate property keys signal an error at registration time.
+
+**** Parameter Types
+
+Every parameter is published in the tool's =inputSchema= as ={"type": "string"}=.
+A parameter that takes another JSON type declares it in =:param-schemas=, an
+alist mapping the parameter name to a schema fragment that replaces the default:
+
+#+begin_src elisp
+(list #'my-search
+      :id "search"
+      :description "Search tasks"
+      :param-schemas
+      '(("after" (type . ["string" "null"]))
+        ("fields" (type . "array") (items . ((type . "string"))))
+        ("filter" (type . "object"))))
+#+end_src
+
+Clients that validate arguments against the schema, such as Claude Code, then
+send =null=, arrays and objects as such rather than as their JSON text. The
+fragment is encoded with =json-encode=, so JSON arrays are written as vectors.
+
+- The description still comes from the =MCP Parameters:= docstring block; a
+  fragment that sets =description= is rejected.
+- Each name must be a handler parameter and may appear once.
+- Registration rejects a fragment =json-encode= cannot encode, and a =type=
+  that is neither a JSON Schema type name nor a vector of distinct ones.
+- =required= is still derived from the handler's arglist, so declaring a
+  parameter's type does not change whether it is optional.
+- Declaring a type does not change how arguments reach the handler: JSON
+  =null= arrives as =nil=, an array as a vector and an object as an alist.
 
 *** Resource Handlers
 
