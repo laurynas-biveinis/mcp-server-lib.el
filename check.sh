@@ -44,7 +44,7 @@
 #   - Check formatting with Biome
 #   - Lint with Biome
 
-set -eu -o pipefail
+set -euo pipefail
 
 readonly SHELL_FILES=(check.sh emacs-mcp-stdio.sh emacs-mcp-stdio-test.sh)
 # Explicitly list markdown files to lint, excluding uncommitted LLM
@@ -269,7 +269,7 @@ fi
 # jscpd copy/paste detection, matching the super-linter CI check
 # (jscpd 5.x, threshold 0 -- any duplicate fails).
 echo -n "Running jscpd... "
-if npx --yes jscpd@5.0.10 --threshold 0 .; then
+if npx --yes jscpd@5.3.0 --threshold 0 .; then
 	echo "OK!"
 else
 	echo "jscpd found duplicate code"

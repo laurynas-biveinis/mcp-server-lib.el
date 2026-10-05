@@ -1118,23 +1118,24 @@ Returns a JSON-RPC response string for the request."
 
 ;;; Notification handlers
 
+(defun mcp-server-lib--server-has-entries-p (server-id registry)
+  "Return non-nil if SERVER-ID has registered entries in REGISTRY."
+  (when-let* ((entries (gethash server-id registry)))
+    (> (hash-table-count entries) 0)))
+
 (defun mcp-server-lib--handle-initialize (id server-id)
   "Handle initialize request with ID for SERVER-ID.
 This implements the MCP initialize handshake, which negotiates protocol
 version and capabilities between the client and server."
   (let ((capabilities (make-hash-table))
-        (tools-table (gethash server-id mcp-server-lib--tools))
-        (resources-table
-         (gethash server-id mcp-server-lib--resources))
-        (templates-table
-         (gethash server-id mcp-server-lib--resource-templates))
         (server-record (gethash server-id mcp-server-lib--servers)))
-    (when (and tools-table (> (hash-table-count tools-table) 0))
+    (when (mcp-server-lib--server-has-entries-p
+           server-id mcp-server-lib--tools)
       (puthash 'tools (make-hash-table) capabilities))
-    (when (or (and resources-table
-                   (> (hash-table-count resources-table) 0))
-              (and templates-table
-                   (> (hash-table-count templates-table) 0)))
+    (when (or (mcp-server-lib--server-has-entries-p
+               server-id mcp-server-lib--resources)
+              (mcp-server-lib--server-has-entries-p
+               server-id mcp-server-lib--resource-templates))
       (puthash 'resources (make-hash-table) capabilities))
     (mcp-server-lib--jsonrpc-response
      id
