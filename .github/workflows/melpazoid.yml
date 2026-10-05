@@ -24,7 +24,8 @@ jobs:
           python -m pip install --upgrade pip
           sudo apt-get install emacs && emacs --version
           git clone https://github.com/riscy/melpazoid.git ~/melpazoid
-          pip install ~/melpazoid
+          python -m pip install ~/melpazoid \
+            --group ~/melpazoid/pyproject.toml:dev
       - name: Run
         env:
           LOCAL_REPO: ${{ github.workspace }}
