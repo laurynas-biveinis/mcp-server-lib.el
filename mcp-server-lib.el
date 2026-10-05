@@ -230,10 +230,9 @@ exists in ARGLIST.  Signal an error if validation fails."
            param-name
            arglist
            :test #'mcp-server-lib--param-name-matches-arg-p)
-    (error
-     "Parameter '%s' in MCP Parameters not in function args %S"
-     param-name
-     arglist)))
+    (error "Parameter '%s' in MCP Parameters not in function args %S"
+           param-name
+           arglist)))
 
 (defun mcp-server-lib--extract-param-descriptions (docstring arglist)
   "Extract parameter descriptions from DOCSTRING based on ARGLIST.
@@ -410,7 +409,8 @@ That is one primitive type name, or a non-empty vector of distinct
 ones, the form `json-encode' writes as a JSON array."
   (let ((name-p
          (lambda (name)
-           (and (stringp name) (member name mcp-server-lib--schema-types)))))
+           (and (stringp name)
+                (member name mcp-server-lib--schema-types)))))
     (if (vectorp type)
         (let ((names (append type nil)))
           (and names
@@ -781,8 +781,8 @@ input; in that case nothing has been mutated."
     (unless (stringp uri)
       (error "Resource URI must be a string"))
     (unless (string-match-p mcp-server-lib--uri-with-scheme-regex uri)
-      (error
-       "Resource URI must have format 'scheme://path': '%s'" uri))
+      (error "Resource URI must have format 'scheme://path': '%s'"
+             uri))
     (when (and (string-match-p "}" uri)
                (not (string-match-p "{" uri)))
       (error "Unmatched '}' in resource URI: %s" uri))
@@ -884,8 +884,7 @@ Supports RFC 6570 simple variables {var} and reserved expansion {+var}."
                        "\\`[A-Za-z_][A-Za-z0-9_]*\\'" var-name)
                 (error
                  "Invalid variable name '%s' in resource template: %s"
-                 var-name
-                 template))
+                 var-name template))
               ;; Add variable segment
               (push (list
                      :type 'variable
@@ -1311,19 +1310,18 @@ METHOD-METRICS is used to track errors for this method."
                       ;; Check for missing required parameters
                       (dolist (required required-params)
                         (unless (memq required provided-params)
-                          (signal
-                           'mcp-server-lib-invalid-params
-                           (list
-                            (format "Missing required parameter: %s"
+                          (signal 'mcp-server-lib-invalid-params
+                                  (list
+                                   (format
+                                    "Missing required parameter: %s"
                                     required)))))
                       ;; Check for unexpected parameters
                       (dolist (provided provided-params)
                         (unless (memq provided expected-params)
-                          (signal
-                           'mcp-server-lib-invalid-params
-                           (list
-                            (format "Unexpected parameter: %s"
-                                    provided)))))
+                          (signal 'mcp-server-lib-invalid-params
+                                  (list
+                                   (format "Unexpected parameter: %s"
+                                           provided)))))
                       ;; All validation passed, collect values and call handler
                       (dolist (param arglist)
                         (let ((param-name (symbol-name param)))
@@ -1829,8 +1827,8 @@ present but not a string.  Return the `:server-id' value, defaulting to
    properties allowed (concat kind " spec"))
   (let ((sid (plist-get properties :server-id)))
     (when (and sid (not (stringp sid)))
-      (error
-       "%s registration requires :server-id to be a string" kind)))
+      (error "%s registration requires :server-id to be a string"
+             kind)))
   (or (plist-get properties :server-id) "default"))
 
 (defun mcp-server-lib-register-tool (handler &rest properties)

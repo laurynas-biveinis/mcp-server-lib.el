@@ -4122,8 +4122,8 @@ optional parameters are provided."
   (let ((response-with-error
          `((jsonrpc . "2.0")
            (id . 789)
-           (error
-            . ((code . -32600) (message . "Invalid Request"))))))
+           (error .
+                  ((code . -32600) (message . "Invalid Request"))))))
     (should-error
      (mcp-server-lib-ert-process-tool-response response-with-error)))
 

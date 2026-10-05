@@ -469,16 +469,16 @@ templates under their sub-section headers when present."
         ;; Calculate totals
         (dolist (entry method-metrics)
           (let ((metrics (cdr entry)))
-            (cl-incf
-             method-total (mcp-server-lib-metrics-calls metrics))
-            (cl-incf
-             method-errors (mcp-server-lib-metrics-errors metrics))))
+            (cl-incf method-total
+                     (mcp-server-lib-metrics-calls metrics))
+            (cl-incf method-errors
+                     (mcp-server-lib-metrics-errors metrics))))
         (dolist (entry tool-metrics)
           (let ((metrics (cdr entry)))
-            (cl-incf
-             tool-total (mcp-server-lib-metrics-calls metrics))
-            (cl-incf
-             tool-errors (mcp-server-lib-metrics-errors metrics))))
+            (cl-incf tool-total
+                     (mcp-server-lib-metrics-calls metrics))
+            (cl-incf tool-errors
+                     (mcp-server-lib-metrics-errors metrics))))
 
         ;; Display summary
         (insert "\nSummary:\n")
