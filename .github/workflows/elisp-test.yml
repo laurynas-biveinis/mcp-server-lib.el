@@ -51,11 +51,30 @@ jobs:
         with:
           version: "snapshot"
 
+      - name: Clean workspace
+        run: eask clean all
+
+      - name: Install compatible package-build
+        if: matrix.emacs_version == '27.2' || matrix.emacs_version == '28.2'
+        run: |
+          # package-build 5.1 requires Emacs 29.1; pin 5.0.3 for older jobs.
+          mkdir "$RUNNER_TEMP/package-build"
+          curl --fail --location --retry 3 \
+            https://github.com/melpa/package-build/archive/cb1fc153c79a0f1f7e3d5df1641bbfe39ddba45e.tar.gz \
+            --output "$RUNNER_TEMP/package-build.tar.gz"
+          tar -xzf "$RUNNER_TEMP/package-build.tar.gz" \
+            --strip-components=1 -C "$RUNNER_TEMP/package-build"
+          emacs -Q --batch "$RUNNER_TEMP/package-build/package-build.el" \
+            --eval "(progn (require 'package)
+                      (package-generate-description-file
+                       (package-buffer-info)
+                       (expand-file-name \"package-build-pkg.el\")))"
+          eask install-file "$RUNNER_TEMP/package-build"
+
       - name: Run tests
         env:
           EMACS_TEST_JUNIT_REPORT: ${{ (matrix.emacs_version != '27.2' && matrix.emacs_version != '28.2') && 'mcp-server-lib-test.xml' || '' }}
         run: |
-          eask clean all
           eask package
           eask install
           eask compile
